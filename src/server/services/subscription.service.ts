@@ -37,7 +37,7 @@ const ALLOWED_TRANSITIONS: Record<SubscriptionStatusType, SubscriptionStatusType
 export class SubscriptionService {
   static async createSubscription(
     session: AuthSessionContext,
-    rawInput: z.infer<typeof createSubscriptionSchema>
+    rawInput: z.input<typeof createSubscriptionSchema>
   ) {
     const input = createSubscriptionSchema.parse(rawInput);
 

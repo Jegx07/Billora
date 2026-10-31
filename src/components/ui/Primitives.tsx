@@ -752,3 +752,131 @@ export function DataTable<T>({
     </div>
   );
 }
+
+
+/* -------------------------------------------------------------------------- */
+/* 12. Card, Button, Modal & Select Primitives                                */
+/* -------------------------------------------------------------------------- */
+export function Card({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "rounded-lg border border-border bg-bg-base shadow-xs overflow-hidden",
+        className
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+export function CardHeader({
+  title,
+  subtitle,
+  action,
+  className,
+}: {
+  title: string;
+  subtitle?: string;
+  action?: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex flex-col sm:flex-row sm:items-center justify-between gap-2 px-5 py-4 border-b border-border",
+        className
+      )}
+    >
+      <div>
+        <h3 className="text-sm font-semibold text-text-primary">{title}</h3>
+        {subtitle && <p className="text-xs text-text-muted mt-0.5">{subtitle}</p>}
+      </div>
+      {action && <div>{action}</div>}
+    </div>
+  );
+}
+
+export function CardBody({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return <div className={cn("p-5", className)}>{children}</div>;
+}
+
+export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  variant?: "primary" | "secondary" | "danger" | "ghost";
+  size?: "sm" | "md" | "lg";
+}
+
+export function Button({
+  variant = "primary",
+  size = "md",
+  className,
+  children,
+  ...props
+}: ButtonProps) {
+  const variantStyles = {
+    primary: "bg-brand text-brand-text hover:bg-brand-hover border-transparent",
+    secondary: "bg-bg-subtle text-text-primary hover:bg-bg-raised border-border",
+    danger:
+      "bg-semantic-danger-subtle text-semantic-danger hover:bg-semantic-danger/20 border-semantic-danger/30",
+    ghost: "bg-transparent text-text-secondary hover:bg-bg-subtle border-transparent",
+  }[variant];
+
+  const sizeStyles = {
+    sm: "h-8 px-3 text-xs",
+    md: "h-9 px-4 text-xs",
+    lg: "h-10 px-5 text-sm",
+  }[size];
+
+  return (
+    <button
+      className={cn(
+        "inline-flex items-center justify-center rounded-md border font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-50 disabled:pointer-events-none",
+        variantStyles,
+        sizeStyles,
+        className
+      )}
+      {...props}
+    >
+      {children}
+    </button>
+  );
+}
+
+export const Modal = ModalDialog;
+
+export interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
+  label?: string;
+}
+
+export function Select({ label, className, children, ...props }: SelectProps) {
+  return (
+    <div className="space-y-1.5">
+      {label && (
+        <label className="block text-xs font-medium text-text-secondary tracking-tight">
+          {label}
+        </label>
+      )}
+      <select
+        className={cn(
+          "h-9 w-full rounded-md border border-border bg-bg-base px-3 text-xs text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",
+          className
+        )}
+        {...props}
+      >
+        {children}
+      </select>
+    </div>
+  );
+}
