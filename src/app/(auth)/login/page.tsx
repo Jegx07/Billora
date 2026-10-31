@@ -208,15 +208,15 @@ export default function LoginPage() {
               </button>
             </form>
 
-            {/* Quick 1-Click Role Switcher for Seeded Accounts */}
+            {/* Quick Credentials Fill for Seeded Roles */}
             <div className="mt-6 border-t border-border pt-5">
               <div className="text-[11px] font-mono uppercase tracking-wider text-text-muted mb-2.5">
-                Instant Seeded Role Access (1-Click)
+                Fill Verified Demo Role Credentials
               </div>
               <div className="grid grid-cols-3 gap-2">
                 <button
                   type="button"
-                  onClick={() => quickDemoLogin("ADMIN")}
+                  onClick={() => fillRoleCredentials("ADMIN")}
                   className="rounded-md border border-border bg-bg-subtle px-2.5 py-2 text-left hover:border-brand transition-colors"
                 >
                   <div className="text-xs font-semibold text-text-primary">Admin</div>
@@ -226,7 +226,7 @@ export default function LoginPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => quickDemoLogin("EMPLOYEE")}
+                  onClick={() => fillRoleCredentials("EMPLOYEE")}
                   className="rounded-md border border-border bg-bg-subtle px-2.5 py-2 text-left hover:border-brand transition-colors"
                 >
                   <div className="text-xs font-semibold text-text-primary">Employee</div>
@@ -236,7 +236,7 @@ export default function LoginPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => quickDemoLogin("CUSTOMER")}
+                  onClick={() => fillRoleCredentials("CUSTOMER")}
                   className="rounded-md border border-border bg-bg-subtle px-2.5 py-2 text-left hover:border-brand transition-colors"
                 >
                   <div className="text-xs font-semibold text-text-primary">Customer</div>
