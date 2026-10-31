@@ -67,20 +67,32 @@ export class SupabaseRestClient {
   }
 
   /**
-   * Signs up a user via Supabase Auth (`/auth/v1/signup`)
+   * Signs up a user via Supabase Auth (`/auth/v1/signup`).
+   * Supports both object `{ email, password, data }` and positional `(email, password, data)` signatures.
    */
-  async signUpWithPassword(params: {
-    email: string;
-    password: string;
-    data?: Record<string, unknown>;
-  }): Promise<SupabaseAuthResponse> {
+  async signUpWithPassword(
+    emailOrParams:
+      | string
+      | {
+          email: string;
+          password: string;
+          data?: Record<string, unknown>;
+        },
+    passwordArg?: string,
+    dataArg?: Record<string, unknown>
+  ): Promise<SupabaseAuthResponse> {
+    const email = typeof emailOrParams === "string" ? emailOrParams : emailOrParams.email;
+    const password =
+      typeof emailOrParams === "string" ? passwordArg || "" : emailOrParams.password;
+    const data = typeof emailOrParams === "string" ? dataArg || {} : emailOrParams.data || {};
+
     const res = await fetch(`${this.baseUrl}/auth/v1/signup`, {
       method: "POST",
       headers: this.headers(),
       body: JSON.stringify({
-        email: params.email,
-        password: params.password,
-        data: params.data || {},
+        email,
+        password,
+        data,
       }),
     });
 
@@ -103,18 +115,28 @@ export class SupabaseRestClient {
   }
 
   /**
-   * Signs in a user via Supabase Auth (`/auth/v1/token?grant_type=password`)
+   * Signs in a user via Supabase Auth (`/auth/v1/token?grant_type=password`).
+   * Supports both object `{ email, password }` and positional `(email, password)` signatures.
    */
-  async signInWithPassword(params: {
-    email: string;
-    password: string;
-  }): Promise<SupabaseAuthResponse> {
+  async signInWithPassword(
+    emailOrParams:
+      | string
+      | {
+          email: string;
+          password: string;
+        },
+    passwordArg?: string
+  ): Promise<SupabaseAuthResponse> {
+    const email = typeof emailOrParams === "string" ? emailOrParams : emailOrParams.email;
+    const password =
+      typeof emailOrParams === "string" ? passwordArg || "" : emailOrParams.password;
+
     const res = await fetch(`${this.baseUrl}/auth/v1/token?grant_type=password`, {
       method: "POST",
       headers: this.headers(),
       body: JSON.stringify({
-        email: params.email,
-        password: params.password,
+        email,
+        password,
       }),
     });
 
@@ -142,10 +164,12 @@ export class SupabaseRestClient {
   async adminCreateUser(params: {
     email: string;
     password: string;
+    fullName?: string;
+    role?: string;
     emailConfirm?: boolean;
     userMetadata?: Record<string, unknown>;
     appMetadata?: Record<string, unknown>;
-  }): Promise<{ user: SupabaseAuthUser | null; error: string | null }> {
+  }): Promise<{ user: SupabaseAuthUser | null; id?: string; error: string | null }> {
     if (typeof window !== "undefined") {
       throw new Error("SECURITY_VIOLATION: adminCreateUser is server-only");
     }
@@ -157,8 +181,15 @@ export class SupabaseRestClient {
         email: params.email,
         password: params.password,
         email_confirm: params.emailConfirm ?? true,
-        user_metadata: params.userMetadata || {},
-        app_metadata: params.appMetadata || {},
+        user_metadata: {
+          full_name: params.fullName,
+          role: params.role,
+          ...(params.userMetadata || {}),
+        },
+        app_metadata: {
+          role: params.role,
+          ...(params.appMetadata || {}),
+        },
       }),
     });
 
@@ -170,7 +201,8 @@ export class SupabaseRestClient {
       };
     }
 
-    return { user: json as SupabaseAuthUser, error: null };
+    const userObj = (json.user ?? json) as SupabaseAuthUser;
+    return { user: userObj, id: userObj?.id, error: null };
   }
 
   /**
@@ -272,13 +304,15 @@ export function createPublicSupabaseClient(accessToken?: string): SupabaseRestCl
   return new SupabaseRestClient(url, publicKey, accessToken);
 }
 
-export function createAdminSupabaseClient(): SupabaseRestClient | null {
+export function createAdminSupabaseClient(): SupabaseRestClient {
   if (typeof window !== "undefined") {
     throw new Error(
       "SECURITY_VIOLATION: createAdminSupabaseClient cannot be called in browser code"
     );
   }
-  if (!isSupabaseAdminConfigured()) return null;
+  if (!isSupabaseAdminConfigured()) {
+    throw new Error("SUPABASE_SERVICE_ROLE_KEY is not configured");
+  }
   const url = getSupabaseUrl()!;
   const serviceKey = getSupabaseServiceRoleKey()!;
   return new SupabaseRestClient(url, serviceKey, serviceKey);

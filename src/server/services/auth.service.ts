@@ -67,11 +67,16 @@ export class AuthService {
         });
         return created?.id ?? null;
       }
-      if (isSupabaseConfigured() && params.role === "CUSTOMER") {
+      if (isSupabaseConfigured()) {
         const pubClient = createPublicSupabaseClient();
         if (pubClient) {
-          const signedUp = await pubClient.signUpWithPassword(params.email, params.password, {
-            full_name: params.fullName,
+          const signedUp = await pubClient.signUpWithPassword({
+            email: params.email,
+            password: params.password,
+            data: {
+              full_name: params.fullName,
+              role: params.role,
+            },
           });
           return signedUp.user?.id ?? null;
         }
@@ -301,6 +306,14 @@ export class AuthService {
     if (user.status !== "ACTIVE") {
       throw new AppError("FORBIDDEN", `Your account is currently ${user.status}`, 403);
     }
+
+    // Ensure existing user identity is also synced to Supabase Auth on login
+    await this.syncSupabaseIdentity({
+      email: user.email,
+      password: input.password,
+      fullName: user.fullName,
+      role: user.role.name as UserRole,
+    });
 
     const rawSessionToken = generateRandomToken(32);
     const csrfToken = generateRandomToken(16);

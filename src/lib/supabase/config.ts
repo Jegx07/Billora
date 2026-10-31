@@ -24,12 +24,32 @@ export interface SupabaseConfigStatus {
   missingVariables: string[];
 }
 
-let envLoaded = false;
+const PLACEHOLDER_VALUES = new Set([
+  "",
+  "your-supabase-url",
+  "your-supabase-anon-key",
+  "your-service-role-key",
+  "undefined",
+  "null",
+]);
+
+function isNonEmptySecret(val?: string | null): val is string {
+  if (!val) return false;
+  const trimmed = val.trim();
+  return trimmed.length > 0 && !PLACEHOLDER_VALUES.has(trimmed.toLowerCase());
+}
+
 function ensureServerEnvLoaded() {
-  if (typeof window !== "undefined" || envLoaded) return;
-  envLoaded = true;
+  if (typeof window !== "undefined") return;
+  if (
+    isNonEmptySecret(process.env.NEXT_PUBLIC_SUPABASE_URL) &&
+    (isNonEmptySecret(process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY) ||
+      isNonEmptySecret(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY))
+  ) {
+    return;
+  }
   try {
-    // Load .env if running in Node CLI context where Next.js hasn't pre-populated process.env
+    // Dynamically read .env so running dev servers pick up newly added Supabase keys without restart
     const fs = require("fs");
     const path = require("path");
     const envPath = path.resolve(process.cwd(), ".env");
@@ -48,7 +68,7 @@ function ensureServerEnvLoaded() {
         ) {
           val = val.slice(1, -1);
         }
-        if (process.env[key] === undefined) {
+        if (!isNonEmptySecret(process.env[key]) && val) {
           process.env[key] = val;
         }
       }
@@ -56,21 +76,6 @@ function ensureServerEnvLoaded() {
   } catch {
     // Ignore in edge/browser runtimes
   }
-}
-
-const PLACEHOLDER_VALUES = new Set([
-  "",
-  "your-supabase-url",
-  "your-supabase-anon-key",
-  "your-service-role-key",
-  "undefined",
-  "null",
-]);
-
-function isNonEmptySecret(val?: string | null): val is string {
-  if (!val) return false;
-  const trimmed = val.trim();
-  return trimmed.length > 0 && !PLACEHOLDER_VALUES.has(trimmed.toLowerCase());
 }
 
 export function getSupabasePublicKey(): string {
