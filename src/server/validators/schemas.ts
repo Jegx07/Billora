@@ -113,6 +113,7 @@ export const subscriptionPlanSchema = z.object({
   allowRenewal: z.boolean().default(true),
   defaultTermMonths: z.coerce.number().int().min(1).default(12),
   status: z.enum(["ACTIVE", "INACTIVE", "ARCHIVED"]).default("ACTIVE"),
+  imageUrl: z.string().optional().nullable(),
   productIds: z.array(z.string()).optional(),
 });
 
