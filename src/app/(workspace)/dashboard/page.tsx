@@ -12,12 +12,20 @@ import {
 import { formatINR } from "@/lib/money";
 import {
   AlertCircle,
+  ArrowRight,
   CalendarClock,
+  CheckSquare,
+  Clock,
   Download,
   FileSpreadsheet,
+  GitBranch,
+  Layers,
+  Mail,
   Play,
   Printer,
   RefreshCw,
+  ShieldCheck,
+  UserCheck,
 } from "lucide-react";
 import Link from "next/link";
 import React, { useCallback, useEffect, useState } from "react";
@@ -112,6 +120,7 @@ export default function DashboardPage() {
   const [data, setData] = useState<DashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [runningBilling, setRunningBilling] = useState(false);
+  const [opsData, setOpsData] = useState<any>(null);
 
   const fetchMetrics = useCallback(async () => {
     setLoading(true);
@@ -125,6 +134,10 @@ export default function DashboardPage() {
       if (json.success) {
         setData(json.data);
       }
+      fetch('/api/operations/overview')
+        .then((r) => r.json())
+        .then((j) => { if (j.success) setOpsData(j.data); })
+        .catch(() => {});
     } finally {
       setLoading(false);
     }
@@ -544,6 +557,143 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
+
+            {/* OPERATIONS & EMPLOYEE WORKFLOW ENGINE */}
+      <div className="mb-8 rounded-lg border border-border bg-bg-base shadow-xs overflow-hidden">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-border px-5 py-4 gap-3 bg-bg-subtle/30">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand/10 text-brand">
+              <GitBranch className="h-4 w-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-semibold text-text-primary">
+                  Employee Operations & Automation Control
+                </h2>
+                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 uppercase tracking-wide">
+                  Active
+                </span>
+              </div>
+              <p className="text-xs text-text-muted">
+                Live task assignments, lifecycle triggers, communications dispatch, and manager governance
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/workflows"
+              className="inline-flex items-center gap-1.5 h-7 rounded border border-border bg-bg-surface px-2.5 text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-bg-subtle"
+            >
+              <GitBranch className="h-3 w-3 text-brand" />
+              Workflow Studio
+            </Link>
+            <Link
+              href="/tasks"
+              className="inline-flex items-center gap-1.5 h-7 rounded bg-brand px-3 text-xs font-semibold text-white hover:bg-brand-hover shadow-xs"
+            >
+              <CheckSquare className="h-3 w-3" />
+              My Tasks
+            </Link>
+          </div>
+        </div>
+
+        {/* 4 Operations KPI Tiles */}
+        <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-y md:divide-y-0 divide-border border-b border-border bg-bg-surface">
+          <Link href="/tasks" className="p-4 hover:bg-bg-subtle/40 transition-colors group">
+            <div className="flex items-center justify-between text-xs text-text-muted mb-1">
+              <span>My Pending Tasks</span>
+              <UserCheck className="h-4 w-4 text-brand group-hover:scale-110 transition-transform" />
+            </div>
+            <div className="text-2xl font-bold font-mono text-text-primary">
+              {opsData?.metrics?.myPendingTasks ?? 0}
+            </div>
+            <div className="text-[11px] text-brand flex items-center gap-1 mt-1 font-medium">
+              <span>View assignment queue</span>
+              <ArrowRight className="h-3 w-3" />
+            </div>
+          </Link>
+
+          <Link href="/tasks" className="p-4 hover:bg-bg-subtle/40 transition-colors group">
+            <div className="flex items-center justify-between text-xs text-text-muted mb-1">
+              <span>Overdue Tasks</span>
+              <AlertCircle className="h-4 w-4 text-semantic-danger group-hover:scale-110 transition-transform" />
+            </div>
+            <div className="text-2xl font-bold font-mono text-semantic-danger">
+              {opsData?.metrics?.myOverdueTasks ?? 0}
+            </div>
+            <div className="text-[11px] text-semantic-danger/90 flex items-center gap-1 mt-1 font-medium">
+              <span>Requires attention</span>
+              <ArrowRight className="h-3 w-3" />
+            </div>
+          </Link>
+
+          <Link href="/approvals" className="p-4 hover:bg-bg-subtle/40 transition-colors group">
+            <div className="flex items-center justify-between text-xs text-text-muted mb-1">
+              <span>Pending Approvals</span>
+              <ShieldCheck className="h-4 w-4 text-semantic-warning group-hover:scale-110 transition-transform" />
+            </div>
+            <div className="text-2xl font-bold font-mono text-semantic-warning">
+              {opsData?.metrics?.pendingApprovals ?? 0}
+            </div>
+            <div className="text-[11px] text-text-muted flex items-center gap-1 mt-1">
+              <span>Manager sign-offs</span>
+              <ArrowRight className="h-3 w-3" />
+            </div>
+          </Link>
+
+          <Link href="/workflows" className="p-4 hover:bg-bg-subtle/40 transition-colors group">
+            <div className="flex items-center justify-between text-xs text-text-muted mb-1">
+              <span>Active Workflows</span>
+              <Layers className="h-4 w-4 text-emerald-500 group-hover:scale-110 transition-transform" />
+            </div>
+            <div className="text-2xl font-bold font-mono text-text-primary">
+              {opsData?.metrics?.activeWorkflows ?? 0}
+            </div>
+            <div className="text-[11px] text-text-muted flex items-center gap-1 mt-1">
+              <span>{opsData?.metrics?.executions24h ?? 0} runs last 24h</span>
+              <ArrowRight className="h-3 w-3" />
+            </div>
+          </Link>
+        </div>
+
+        {/* Recent Operational Tasks Quick List */}
+        {opsData && opsData.recentTasks && opsData.recentTasks.length > 0 && (
+          <div className="p-4 bg-bg-base">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold text-text-secondary">
+                Recent Task Assignments & Touchpoints
+              </span>
+              <Link href="/tasks" className="text-xs text-brand hover:underline font-medium">
+                All Tasks →
+              </Link>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+              {opsData.recentTasks.slice(0, 3).map((tsk: any) => (
+                <Link
+                  key={tsk.id}
+                  href="/tasks"
+                  className="p-2.5 rounded border border-border bg-bg-surface hover:border-brand/40 transition-all text-xs block"
+                >
+                  <div className="flex items-center justify-between gap-1 mb-1">
+                    <span className="font-mono text-[10px] text-brand font-semibold">
+                      {tsk.taskCode}
+                    </span>
+                    <StatusBadge status={tsk.status} />
+                  </div>
+                  <div className="font-medium text-text-primary truncate">
+                    {tsk.title}
+                  </div>
+                  {tsk.customer && (
+                    <div className="text-[10px] text-text-muted mt-0.5">
+                      Customer: {tsk.customer.contactName}
+                    </div>
+                  )}
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Upcoming Renewals & Actionable Queue */}
       <div className="rounded-lg border border-border bg-bg-base shadow-xs overflow-hidden">

@@ -35,6 +35,14 @@ model User {
   notifications       Notification[]
   auditLogs           AuditLog[]
   subscriptionChanges SubscriptionHistory[]
+  workflowsCreated    Workflow[]
+  tasksAssigned       WorkflowTask[]        @relation("TaskAssignee")
+  tasksCreated        WorkflowTask[]        @relation("TaskCreator")
+  tasksManaged        WorkflowTask[]        @relation("TaskManager")
+  taskComments        WorkflowTaskComment[]
+  approvalsRequested  WorkflowApproval[]    @relation("ApprovalRequester")
+  approvalsDecided    WorkflowApproval[]    @relation("ApprovalDecider")
+  emailsSent          EmailMessage[]
   createdAt           DateTime              @default(now())
   updatedAt           DateTime              @updatedAt
 
@@ -69,29 +77,32 @@ model PasswordResetToken {
 
 // 3. Customer & 4. Employee
 model Customer {
-  id                 String          @id @default(cuid())
-  customerCode       String          @unique
-  userId             String?         @unique
-  user               User?           @relation(fields: [userId], references: [id])
+  id                 String              @id @default(cuid())
+  customerCode       String              @unique
+  userId             String?             @unique
+  user               User?               @relation(fields: [userId], references: [id])
   companyName        String?
   contactName        String
-  email              String          @unique
+  email              String              @unique
   phone              String?
   gstin              String?
   billingAddress     String?
   city               String?
   state              String?
-  country            String          @default("India")
+  country            String              @default("India")
   postalCode         String?
   assignedEmployeeId String?
-  assignedEmployee   Employee?       @relation("AssignedCustomers", fields: [assignedEmployeeId], references: [id])
+  assignedEmployee   Employee?           @relation("AssignedCustomers", fields: [assignedEmployeeId], references: [id])
   quotations         Quotation[]
   subscriptions      Subscription[]
   invoices           Invoice[]
+  workflowTasks      WorkflowTask[]
+  workflowExecutions WorkflowExecution[]
+  emailMessages      EmailMessage[]
   payments           Payment[]
   discountUsages     DiscountUsage[]
-  createdAt          DateTime        @default(now())
-  updatedAt          DateTime        @updatedAt
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
   deletedAt          DateTime?
 
   @@index([assignedEmployeeId])
@@ -158,7 +169,7 @@ model SubscriptionPlan {
   name              String
   description       String?
   basePrice         Decimal
-  billingFrequency  String              // DAILY, WEEKLY, MONTHLY, YEARLY
+  billingFrequency  String // DAILY, WEEKLY, MONTHLY, YEARLY
   minQuantity       Int                 @default(1)
   availableFrom     DateTime?
   availableUntil    DateTime?
@@ -217,29 +228,31 @@ model QuotationTemplateLine {
 }
 
 model Quotation {
-  id              String             @id @default(cuid())
-  quotationNumber String             @unique
-  customerId      String
-  customer        Customer           @relation(fields: [customerId], references: [id])
-  planId          String
-  plan            SubscriptionPlan   @relation(fields: [planId], references: [id])
-  templateId      String?
-  template        QuotationTemplate? @relation(fields: [templateId], references: [id])
-  discountId      String?
-  discount        Discount?          @relation(fields: [discountId], references: [id])
-  status          String             @default("DRAFT") // DRAFT, QUOTATION, CONFIRMED, EXPIRED, CANCELLED
-  issueDate       DateTime           @default(now())
-  expiryDate      DateTime
-  subtotal        Decimal
-  discountAmount  Decimal            @default(0)
-  taxAmount       Decimal            @default(0)
-  totalAmount     Decimal
-  notes           String?
-  createdById     String
-  lines           QuotationLine[]
-  subscription    Subscription?
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
+  id                 String              @id @default(cuid())
+  quotationNumber    String              @unique
+  customerId         String
+  customer           Customer            @relation(fields: [customerId], references: [id])
+  planId             String
+  plan               SubscriptionPlan    @relation(fields: [planId], references: [id])
+  templateId         String?
+  template           QuotationTemplate?  @relation(fields: [templateId], references: [id])
+  discountId         String?
+  discount           Discount?           @relation(fields: [discountId], references: [id])
+  status             String              @default("DRAFT") // DRAFT, QUOTATION, CONFIRMED, EXPIRED, CANCELLED
+  issueDate          DateTime            @default(now())
+  expiryDate         DateTime
+  subtotal           Decimal
+  discountAmount     Decimal             @default(0)
+  taxAmount          Decimal             @default(0)
+  totalAmount        Decimal
+  notes              String?
+  createdById        String
+  lines              QuotationLine[]
+  subscription       Subscription?
+  workflowTasks      WorkflowTask[]
+  workflowExecutions WorkflowExecution[]
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
 
   @@index([customerId, status])
   @@index([expiryDate])
@@ -280,7 +293,7 @@ model Subscription {
   discountId         String?
   discount           Discount?             @relation(fields: [discountId], references: [id])
   status             String                @default("DRAFT") // DRAFT, QUOTATION, CONFIRMED, ACTIVE, PAUSED, CANCELLED, EXPIRED, CLOSED
-  billingFrequency   String                // DAILY, WEEKLY, MONTHLY, YEARLY
+  billingFrequency   String // DAILY, WEEKLY, MONTHLY, YEARLY
   paymentTermsDays   Int                   @default(7)
   startDate          DateTime
   expiryDate         DateTime?
@@ -301,6 +314,9 @@ model Subscription {
   history            SubscriptionHistory[]
   billingPeriods     BillingPeriod[]
   invoices           Invoice[]
+  workflowTasks      WorkflowTask[]
+  workflowExecutions WorkflowExecution[]
+  emailMessages      EmailMessage[]
   createdAt          DateTime              @default(now())
   updatedAt          DateTime              @updatedAt
 
@@ -368,35 +384,38 @@ model BillingPeriod {
 }
 
 model Invoice {
-  id                 String         @id @default(cuid())
-  invoiceNumber      String         @unique
+  id                 String              @id @default(cuid())
+  invoiceNumber      String              @unique
   customerId         String
-  customer           Customer       @relation(fields: [customerId], references: [id])
+  customer           Customer            @relation(fields: [customerId], references: [id])
   subscriptionId     String?
-  subscription       Subscription?  @relation(fields: [subscriptionId], references: [id])
-  billingPeriodId    String?        @unique
-  billingPeriod      BillingPeriod? @relation(fields: [billingPeriodId], references: [id])
+  subscription       Subscription?       @relation(fields: [subscriptionId], references: [id])
+  billingPeriodId    String?             @unique
+  billingPeriod      BillingPeriod?      @relation(fields: [billingPeriodId], references: [id])
   billingPeriodStart DateTime?
   billingPeriodEnd   DateTime?
-  idempotencyKey     String?        @unique
+  idempotencyKey     String?             @unique
   discountId         String?
-  discount           Discount?      @relation(fields: [discountId], references: [id])
-  invoiceDate        DateTime       @default(now())
+  discount           Discount?           @relation(fields: [discountId], references: [id])
+  invoiceDate        DateTime            @default(now())
   dueDate            DateTime
-  status             String         @default("DRAFT") // DRAFT, CONFIRMED, PAID, CANCELLED
+  status             String              @default("DRAFT") // DRAFT, CONFIRMED, PAID, CANCELLED
   subtotal           Decimal
-  discountAmount     Decimal        @default(0)
-  taxAmount          Decimal        @default(0)
+  discountAmount     Decimal             @default(0)
+  taxAmount          Decimal             @default(0)
   totalAmount        Decimal
-  amountPaid         Decimal        @default(0)
+  amountPaid         Decimal             @default(0)
   outstandingAmount  Decimal
   paidAt             DateTime?
   cancelledAt        DateTime?
   notes              String?
   lines              InvoiceLine[]
   payments           Payment[]
-  createdAt          DateTime       @default(now())
-  updatedAt          DateTime       @updatedAt
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  workflowExecutions WorkflowExecution[]
+  workflowTasks      WorkflowTask[]
+  emailMessages      EmailMessage[]
 
   @@unique([subscriptionId, billingPeriodStart, billingPeriodEnd])
   @@index([customerId, status])
@@ -437,7 +456,7 @@ model Payment {
   invoice              Invoice  @relation(fields: [invoiceId], references: [id])
   customerId           String
   customer             Customer @relation(fields: [customerId], references: [id])
-  method               String   // UPI, BANK_TRANSFER, CREDIT_CARD, DEBIT_CARD, CASH, RAZORPAY, OTHER
+  method               String // UPI, BANK_TRANSFER, CREDIT_CARD, DEBIT_CARD, CASH, RAZORPAY, OTHER
   amount               Decimal
   refundedAmount       Decimal  @default(0)
   paymentDate          DateTime @default(now())
@@ -488,7 +507,7 @@ model Discount {
   id                String            @id @default(cuid())
   code              String            @unique
   name              String
-  discountType      String            // FIXED, PERCENTAGE
+  discountType      String // FIXED, PERCENTAGE
   value             Decimal
   minPurchaseAmount Decimal           @default(0)
   minQuantity       Int               @default(1)
@@ -570,15 +589,287 @@ model AuditLog {
 }
 
 model BillingJobRun {
-  id                String   @id @default(cuid())
-  runCode           String   @unique
-  triggeredBy       String   @default("SCHEDULER") // SCHEDULER, MANUAL, BULLMQ
-  status            String   @default("COMPLETED") // RUNNING, COMPLETED, PARTIAL_FAILURE, FAILED
-  eligibleCount     Int      @default(0)
-  generatedCount    Int      @default(0)
-  skippedCount      Int      @default(0)
-  failedCount       Int      @default(0)
-  detailsJson       String?
-  startedAt         DateTime @default(now())
-  completedAt       DateTime?
+  id             String    @id @default(cuid())
+  runCode        String    @unique
+  triggeredBy    String    @default("SCHEDULER") // SCHEDULER, MANUAL, BULLMQ
+  status         String    @default("COMPLETED") // RUNNING, COMPLETED, PARTIAL_FAILURE, FAILED
+  eligibleCount  Int       @default(0)
+  generatedCount Int       @default(0)
+  skippedCount   Int       @default(0)
+  failedCount    Int       @default(0)
+  detailsJson    String?
+  startedAt      DateTime  @default(now())
+  completedAt    DateTime?
+}
+
+// --------------------------------------------------------------------------
+// OPERATIONS & WORKFLOW AUTOMATION MODULE
+// --------------------------------------------------------------------------
+
+model Workflow {
+  id                 String               @id @default(cuid())
+  workflowCode       String               @unique // WKF-OPS-101
+  name               String
+  description        String?
+  category           String               @default("GENERAL") // RENEWAL, ONBOARDING, COLLECTIONS, BILLING, SUPPORT, GENERAL
+  ownerId            String
+  owner              User                 @relation(fields: [ownerId], references: [id])
+  assignedDepartment String?              @default("Operations")
+  priority           String               @default("MEDIUM") // LOW, MEDIUM, HIGH, URGENT
+  triggerType        String // SUBSCRIPTION_RENEWAL, SUBSCRIPTION_CREATED, PAYMENT_FAILED, etc.
+  triggerConfig      String? // JSON string
+  status             String               @default("DRAFT") // DRAFT, TEST, PUBLISHED, ACTIVE, PAUSED, FAILED, ARCHIVED
+  version            Int                  @default(1)
+  versions           WorkflowVersion[]
+  executions         WorkflowExecution[]
+  tasks              WorkflowTask[]
+  schedules          AutomationSchedule[]
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+
+  @@index([status, category])
+  @@index([ownerId])
+}
+
+model WorkflowVersion {
+  id          String              @id @default(cuid())
+  workflowId  String
+  workflow    Workflow            @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  version     Int
+  definition  String // JSON string of nodes and edges
+  changelog   String?
+  publishedAt DateTime?
+  publishedBy String?
+  executions  WorkflowExecution[]
+  createdAt   DateTime            @default(now())
+
+  @@unique([workflowId, version])
+}
+
+model WorkflowExecution {
+  id             String                  @id @default(cuid())
+  executionCode  String                  @unique // WEX-2026-001
+  workflowId     String
+  workflow       Workflow                @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  versionId      String?
+  version        WorkflowVersion?        @relation(fields: [versionId], references: [id])
+  triggerEvent   String
+  triggerPayload String? // JSON snapshot
+  customerId     String?
+  customer       Customer?               @relation(fields: [customerId], references: [id])
+  subscriptionId String?
+  subscription   Subscription?           @relation(fields: [subscriptionId], references: [id])
+  invoiceId      String?
+  invoice        Invoice?                @relation(fields: [invoiceId], references: [id])
+  quotationId    String?
+  quotation      Quotation?              @relation(fields: [quotationId], references: [id])
+  status         String                  @default("RUNNING") // RUNNING, COMPLETED, FAILED, PAUSED, WAITING_APPROVAL, CANCELLED
+  currentStep    String?
+  startedAt      DateTime                @default(now())
+  completedAt    DateTime?
+  retryCount     Int                     @default(0)
+  failureReason  String?
+  idempotencyKey String?                 @unique
+  contextData    String? // JSON
+  steps          WorkflowExecutionStep[]
+  tasks          WorkflowTask[]
+  approvals      WorkflowApproval[]
+  emails         EmailMessage[]
+  createdAt      DateTime                @default(now())
+
+  @@index([workflowId, status])
+  @@index([customerId])
+  @@index([subscriptionId])
+}
+
+model WorkflowExecutionStep {
+  id            String            @id @default(cuid())
+  executionId   String
+  execution     WorkflowExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+  nodeId        String
+  nodeType      String
+  nodeLabel     String
+  status        String // SUCCESS, FAILED, RUNNING, SKIPPED, WAITING_APPROVAL
+  inputPayload  String? // JSON
+  outputPayload String? // JSON
+  errorMessage  String?
+  startedAt     DateTime          @default(now())
+  completedAt   DateTime?
+
+  @@index([executionId, status])
+}
+
+model WorkflowTask {
+  id                  String                 @id @default(cuid())
+  taskCode            String                 @unique // TSK-2026-101
+  title               String
+  description         String?
+  category            String?                @default("GENERAL")
+  priority            String                 @default("MEDIUM") // LOW, MEDIUM, HIGH, URGENT
+  status              String                 @default("ASSIGNED") // ASSIGNED, ACCEPTED, IN_PROGRESS, ON_HOLD, BLOCKED, AWAITING_APPROVAL, COMPLETED, CANCELLED, OVERDUE
+  creatorId           String
+  creator             User                   @relation("TaskCreator", fields: [creatorId], references: [id])
+  assigneeId          String?
+  assignee            User?                  @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  managerId           String?
+  manager             User?                  @relation("TaskManager", fields: [managerId], references: [id])
+  customerId          String?
+  customer            Customer?              @relation(fields: [customerId], references: [id])
+  subscriptionId      String?
+  subscription        Subscription?          @relation(fields: [subscriptionId], references: [id])
+  invoiceId           String?
+  invoice             Invoice?               @relation(fields: [invoiceId], references: [id])
+  quotationId         String?
+  quotation           Quotation?             @relation(fields: [quotationId], references: [id])
+  workflowId          String?
+  workflow            Workflow?              @relation(fields: [workflowId], references: [id])
+  workflowExecutionId String?
+  workflowExecution   WorkflowExecution?     @relation(fields: [workflowExecutionId], references: [id])
+  startDate           DateTime?
+  dueDate             DateTime?
+  completedAt         DateTime?
+  progress            Int                    @default(0) // 0-100
+  blockerReason       String?
+  collaborators       WorkflowTaskAssignee[]
+  comments            WorkflowTaskComment[]
+  approvals           WorkflowApproval[]
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+
+  @@index([assigneeId, status])
+  @@index([creatorId])
+  @@index([customerId])
+  @@index([dueDate, status])
+}
+
+model WorkflowTaskAssignee {
+  id         String       @id @default(cuid())
+  taskId     String
+  task       WorkflowTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId     String
+  role       String       @default("COLLABORATOR") // PRIMARY, COLLABORATOR, REVIEWER
+  assignedAt DateTime     @default(now())
+
+  @@unique([taskId, userId])
+}
+
+model WorkflowTaskComment {
+  id          String       @id @default(cuid())
+  taskId      String
+  task        WorkflowTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  authorId    String
+  author      User         @relation(fields: [authorId], references: [id])
+  content     String
+  isInternal  Boolean      @default(true)
+  attachments String? // JSON array
+  createdAt   DateTime     @default(now())
+
+  @@index([taskId, createdAt])
+}
+
+model WorkflowApproval {
+  id                  String             @id @default(cuid())
+  approvalCode        String             @unique // APR-2026-001
+  workflowExecutionId String?
+  workflowExecution   WorkflowExecution? @relation(fields: [workflowExecutionId], references: [id])
+  taskId              String?
+  task                WorkflowTask?      @relation(fields: [taskId], references: [id])
+  type                String // DISCOUNT_OVERRIDE, CANCELLATION, REFUND, HIGH_VALUE_QUOTATION, BULK_EMAIL, TASK_COMPLETION
+  title               String
+  description         String?
+  entityType          String?
+  entityId            String?
+  requestedById       String
+  requestedBy         User               @relation("ApprovalRequester", fields: [requestedById], references: [id])
+  approverId          String?
+  approver            User?              @relation("ApprovalDecider", fields: [approverId], references: [id])
+  status              String             @default("PENDING") // PENDING, APPROVED, REJECTED
+  decisionComment     String?
+  requestedAt         DateTime           @default(now())
+  decidedAt           DateTime?
+  metadata            String? // JSON
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  @@index([status, type])
+  @@index([requestedById])
+  @@index([approverId])
+}
+
+model EmailTemplate {
+  id           String         @id @default(cuid())
+  templateCode String         @unique // TPL-RENEWAL-01
+  name         String
+  category     String         @default("GENERAL") // ONBOARDING, BILLING, RENEWAL, RETENTION, SUPPORT, GENERAL
+  subject      String
+  bodyHtml     String
+  variables    String? // JSON array
+  isSystem     Boolean        @default(false)
+  emails       EmailMessage[]
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@index([category])
+}
+
+model EmailMessage {
+  id                  String               @id @default(cuid())
+  messageCode         String               @unique // EML-2026-101
+  templateId          String?
+  template            EmailTemplate?       @relation(fields: [templateId], references: [id])
+  senderId            String?
+  sender              User?                @relation(fields: [senderId], references: [id])
+  senderEmail         String
+  recipientEmail      String
+  recipientName       String?
+  cc                  String?
+  bcc                 String?
+  subject             String
+  bodyHtml            String
+  customerId          String?
+  customer            Customer?            @relation(fields: [customerId], references: [id])
+  subscriptionId      String?
+  subscription        Subscription?        @relation(fields: [subscriptionId], references: [id])
+  invoiceId           String?
+  invoice             Invoice?             @relation(fields: [invoiceId], references: [id])
+  workflowExecutionId String?
+  workflowExecution   WorkflowExecution?   @relation(fields: [workflowExecutionId], references: [id])
+  status              String               @default("QUEUED") // DRAFT, SCHEDULED, QUEUED, ACCEPTED, DELIVERED, BOUNCED, FAILED
+  providerMessageId   String?
+  scheduledFor        DateTime?
+  sentAt              DateTime?
+  deliveredAt         DateTime?
+  failedReason        String?
+  metadata            String? // JSON
+  events              EmailDeliveryEvent[]
+  createdAt           DateTime             @default(now())
+
+  @@index([recipientEmail, status])
+  @@index([customerId])
+  @@index([status, createdAt])
+}
+
+model EmailDeliveryEvent {
+  id              String       @id @default(cuid())
+  emailMessageId  String
+  emailMessage    EmailMessage @relation(fields: [emailMessageId], references: [id], onDelete: Cascade)
+  event           String // QUEUED, ACCEPTED, DELIVERED, OPENED, CLICKED, BOUNCED, FAILED
+  providerPayload String?
+  timestamp       DateTime     @default(now())
+
+  @@index([emailMessageId, timestamp])
+}
+
+model AutomationSchedule {
+  id             String    @id @default(cuid())
+  workflowId     String
+  workflow       Workflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  cronExpression String
+  lastRunAt      DateTime?
+  nextRunAt      DateTime?
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([workflowId, isActive])
 }
