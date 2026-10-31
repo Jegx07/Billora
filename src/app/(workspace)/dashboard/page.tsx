@@ -10,6 +10,7 @@ import {
   useToast,
 } from "@/components/ui/Primitives";
 import { formatINR } from "@/lib/money";
+import { getClientCache, invalidateClientCache, setClientCache } from "@/lib/swr-cache";
 import {
   AlertCircle,
   ArrowRight,
@@ -123,21 +124,42 @@ export default function DashboardPage() {
   const [opsData, setOpsData] = useState<any>(null);
 
   const fetchMetrics = useCallback(async () => {
-    setLoading(true);
-    try {
-      const qs = new URLSearchParams({ preset });
-      if (preset === "CUSTOM" && customStart) qs.set("startDate", customStart);
-      if (preset === "CUSTOM" && customEnd) qs.set("endDate", customEnd);
+    const qs = new URLSearchParams({ preset });
+    if (preset === "CUSTOM" && customStart) qs.set("startDate", customStart);
+    if (preset === "CUSTOM" && customEnd) qs.set("endDate", customEnd);
 
-      const res = await fetch(`/api/analytics/dashboard?${qs.toString()}`);
-      const json = await res.json();
+    const dashKey = `dashboard:metrics:${qs.toString()}`;
+    const opsKey = `dashboard:ops`;
+    const cachedDash = getClientCache<DashboardResponse>(dashKey, 25_000);
+    const cachedOps = getClientCache<any>(opsKey, 25_000);
+
+    if (cachedDash) {
+      setData(cachedDash);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+    if (cachedOps) {
+      setOpsData(cachedOps);
+    }
+
+    try {
+      const [dashRes, opsRes] = await Promise.all([
+        fetch(`/api/analytics/dashboard?${qs.toString()}`),
+        fetch("/api/operations/overview").catch(() => null),
+      ]);
+      const json = await dashRes.json();
       if (json.success) {
         setData(json.data);
+        setClientCache(dashKey, json.data);
       }
-      fetch('/api/operations/overview')
-        .then((r) => r.json())
-        .then((j) => { if (j.success) setOpsData(j.data); })
-        .catch(() => {});
+      if (opsRes) {
+        const opsJson = await opsRes.json().catch(() => null);
+        if (opsJson?.success) {
+          setOpsData(opsJson.data);
+          setClientCache(opsKey, opsJson.data);
+        }
+      }
     } finally {
       setLoading(false);
     }
@@ -163,6 +185,8 @@ export default function DashboardPage() {
           description: `Generated ${run.generatedCount} new invoices (${run.skippedCount} duplicate/not-due skipped, ${run.failedCount} failed).`,
           variant: "success",
         });
+        invalidateClientCache("dashboard:");
+        invalidateClientCache("invoices:");
         fetchMetrics();
       } else {
         toast({

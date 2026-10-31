@@ -9,6 +9,7 @@ import {
   StatusBadge,
   useToast,
 } from "@/components/ui/Primitives";
+import { getClientCache, invalidateClientCache, setClientCache } from "@/lib/swr-cache";
 import { Building2, Eye, Plus } from "lucide-react";
 import Link from "next/link";
 import React, { useCallback, useEffect, useState } from "react";
@@ -49,19 +50,31 @@ export default function CustomersPage() {
   const [selectedDetail, setSelectedDetail] = useState<Record<string, any> | null>(null);
 
   const loadCustomers = useCallback(async () => {
-    setLoading(true);
+    const qs = new URLSearchParams({
+      page: String(page),
+      pageSize: "20",
+      search,
+    });
+    const cacheKey = `customers:${qs.toString()}`;
+    const cached = getClientCache<{ data: CustomerRow[]; totalPages: number; total: number }>(cacheKey, 20_000);
+    if (cached) {
+      setCustomers(cached.data);
+      setTotalPages(cached.totalPages);
+      setTotalRecords(cached.total);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
     try {
-      const qs = new URLSearchParams({
-        page: String(page),
-        pageSize: "20",
-        search,
-      });
       const res = await fetch(`/api/customers?${qs.toString()}`);
       const json = await res.json();
       if (json.success) {
+        const totalPagesVal = json.meta?.totalPages || 1;
+        const totalVal = json.meta?.total || json.data.length;
         setCustomers(json.data);
-        setTotalPages(json.meta?.totalPages || 1);
-        setTotalRecords(json.meta?.total || json.data.length);
+        setTotalPages(totalPagesVal);
+        setTotalRecords(totalVal);
+        setClientCache(cacheKey, { data: json.data, totalPages: totalPagesVal, total: totalVal });
       }
     } finally {
       setLoading(false);
@@ -109,6 +122,7 @@ export default function CustomersPage() {
       setEmail("");
       setPhone("");
       setGstin("");
+      invalidateClientCache("customers:");
       loadCustomers();
     } finally {
       setSubmitting(false);

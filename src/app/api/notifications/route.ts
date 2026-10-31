@@ -1,3 +1,4 @@
+import { getOrSetServerCache } from "@/server/cache/query-cache";
 import { prisma } from "@/server/db/client";
 import { apiSuccess, handleApiError } from "@/server/errors";
 import { requireAuth } from "@/server/middlewares/auth";
@@ -7,6 +8,21 @@ import { NextRequest } from "next/server";
 export async function GET(req: NextRequest) {
   try {
     const session = await requireAuth(req);
+    const { searchParams } = new URL(req.url);
+    const countOnly = searchParams.get("countOnly") === "true";
+
+    if (countOnly) {
+      const unreadCount = await getOrSetServerCache(
+        `notif:count:${session.userId}`,
+        15_000,
+        () =>
+          prisma.notification.count({
+            where: { userId: session.userId, isRead: false },
+          })
+      );
+      return apiSuccess({ unreadCount });
+    }
+
     const notifications = await prisma.notification.findMany({
       where: { userId: session.userId },
       orderBy: { createdAt: "desc" },

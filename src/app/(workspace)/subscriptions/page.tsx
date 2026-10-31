@@ -6,6 +6,7 @@ import {
   PageHeader,
   StatusBadge,
 } from "@/components/ui/Primitives";
+import { getClientCache, setClientCache } from "@/lib/swr-cache";
 import { Eye, Plus } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -23,21 +24,33 @@ export default function SubscriptionsPage() {
   const [totalRecords, setTotalRecords] = useState(0);
 
   const loadSubscriptions = useCallback(async () => {
-    setLoading(true);
+    const qs = new URLSearchParams({
+      page: String(page),
+      pageSize: "20",
+      search,
+      ...(status ? { status } : {}),
+      ...(frequency ? { frequency } : {}),
+    });
+    const cacheKey = `subscriptions:${qs.toString()}`;
+    const cached = getClientCache<{ data: any[]; totalPages: number; total: number }>(cacheKey, 20_000);
+    if (cached) {
+      setSubscriptions(cached.data);
+      setTotalPages(cached.totalPages);
+      setTotalRecords(cached.total);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
     try {
-      const qs = new URLSearchParams({
-        page: String(page),
-        pageSize: "20",
-        search,
-        ...(status ? { status } : {}),
-        ...(frequency ? { frequency } : {}),
-      });
       const res = await fetch(`/api/subscriptions?${qs.toString()}`);
       const json = await res.json();
       if (json.success) {
+        const totalPagesVal = json.meta?.totalPages || 1;
+        const totalVal = json.meta?.total || json.data.length;
         setSubscriptions(json.data);
-        setTotalPages(json.meta?.totalPages || 1);
-        setTotalRecords(json.meta?.total || json.data.length);
+        setTotalPages(totalPagesVal);
+        setTotalRecords(totalVal);
+        setClientCache(cacheKey, { data: json.data, totalPages: totalPagesVal, total: totalVal });
       }
     } finally {
       setLoading(false);

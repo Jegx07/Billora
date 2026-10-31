@@ -1,4 +1,5 @@
 import { calculateVariantUnitPrice, toNumber2 } from "@/lib/money";
+import { getOrSetServerCache } from "@/server/cache/query-cache";
 import { prisma } from "@/server/db/client";
 import { apiSuccess, handleApiError } from "@/server/errors";
 import { requireAuth } from "@/server/middlewares/auth";
@@ -9,40 +10,43 @@ export async function GET(req: NextRequest) {
   try {
     await requireAuth(req);
     const { searchParams } = new URL(req.url);
-    const status = searchParams.get("status");
+    const status = searchParams.get("status") || "";
     const search = (searchParams.get("search") || "").trim();
 
-    const products = await prisma.product.findMany({
-      where: {
-        ...(status ? { status } : {}),
-        ...(search
-          ? {
-              OR: [
-                { name: { contains: search } },
-                { productCode: { contains: search } },
-                { description: { contains: search } },
-              ],
-            }
-          : {}),
-      },
-      include: {
-        variants: {
-          orderBy: { additionalPrice: "asc" },
+    const cacheKey = `catalog:products:${status}:${search}`;
+    const enriched = await getOrSetServerCache(cacheKey, 60_000, async () => {
+      const products = await prisma.product.findMany({
+        where: {
+          ...(status ? { status } : {}),
+          ...(search
+            ? {
+                OR: [
+                  { name: { contains: search } },
+                  { productCode: { contains: search } },
+                  { description: { contains: search } },
+                ],
+              }
+            : {}),
         },
-      },
-      orderBy: { createdAt: "desc" },
-    });
+        include: {
+          variants: {
+            orderBy: { additionalPrice: "asc" },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+      });
 
-    const enriched = products.map((p) => ({
-      ...p,
-      salesPrice: toNumber2(p.salesPrice),
-      costPrice: toNumber2(p.costPrice),
-      variants: p.variants.map((v) => ({
-        ...v,
-        additionalPrice: toNumber2(v.additionalPrice),
-        finalUnitPrice: toNumber2(calculateVariantUnitPrice(p.salesPrice, v.additionalPrice)),
-      })),
-    }));
+      return products.map((p) => ({
+        ...p,
+        salesPrice: toNumber2(p.salesPrice),
+        costPrice: toNumber2(p.costPrice),
+        variants: p.variants.map((v) => ({
+          ...v,
+          additionalPrice: toNumber2(v.additionalPrice),
+          finalUnitPrice: toNumber2(calculateVariantUnitPrice(p.salesPrice, v.additionalPrice)),
+        })),
+      }));
+    });
 
     return apiSuccess(enriched);
   } catch (error) {

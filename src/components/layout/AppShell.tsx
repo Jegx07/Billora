@@ -1,6 +1,7 @@
 "use client";
 
 import { useToast } from "@/components/ui/Primitives";
+import { invalidateClientCache } from "@/lib/swr-cache";
 import { cn } from "@/lib/utils";
 import { BilloraBrandLink, BilloraIcon, BilloraLogo } from "@/components/brand/Logo";
 import {
@@ -231,26 +232,31 @@ function isPathAllowedForRole(pathname: string, role: "ADMIN" | "EMPLOYEE"): boo
   );
 }
 
+let cachedSessionUser: SessionUser | null = null;
+let cachedUnreadCount = 0;
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { toast } = useToast();
 
-  const [user, setUser] = useState<SessionUser | null>(null);
-  const [loadingAuth, setLoadingAuth] = useState(true);
+  const [user, setUser] = useState<SessionUser | null>(() => cachedSessionUser);
+  const [loadingAuth, setLoadingAuth] = useState<boolean>(() => !cachedSessionUser);
   const [collapsed, setCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [cmdOpen, setCmdOpen] = useState(false);
   const [cmdQuery, setCmdQuery] = useState("");
   const [darkMode, setDarkMode] = useState(false);
-  const [unreadNotifs, setUnreadNotifs] = useState(0);
+  const [unreadNotifs, setUnreadNotifs] = useState<number>(() => cachedUnreadCount);
 
   const loadNotificationCount = async () => {
     try {
-      const res = await fetch("/api/notifications", { cache: "no-store" });
+      const res = await fetch("/api/notifications?countOnly=true");
       const json = await res.json();
       if (json.success) {
-        setUnreadNotifs(json.data.unreadCount || 0);
+        const count = json.data.unreadCount || 0;
+        cachedUnreadCount = count;
+        setUnreadNotifs(count);
       }
     } catch {
       // ignore
@@ -259,21 +265,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const loadSession = async () => {
     try {
-      const res = await fetch("/api/auth/me", { cache: "no-store" });
+      const res = await fetch("/api/auth/me");
       const json = await res.json();
       if (json.success && json.data?.authenticated) {
         const u = json.data.user as SessionUser;
+        cachedSessionUser = u;
         setUser(u);
         if (u.role === "CUSTOMER") {
           router.replace("/portal");
           return;
         }
       } else {
+        cachedSessionUser = null;
+        setUser(null);
         router.replace("/login");
         return;
       }
     } catch {
-      router.replace("/login");
+      if (!cachedSessionUser) {
+        router.replace("/login");
+      }
     } finally {
       setLoadingAuth(false);
     }
@@ -319,6 +330,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     try {
       await fetch("/api/auth/logout", { method: "POST" });
     } finally {
+      cachedSessionUser = null;
+      cachedUnreadCount = 0;
+      invalidateClientCache();
       setUser(null);
       router.replace("/login");
       router.refresh();
@@ -401,6 +415,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     <Link
                       key={item.href}
                       href={item.href}
+                      prefetch={true}
                       title={collapsed ? item.name : undefined}
                       className={cn(
                         "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-xs font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand",

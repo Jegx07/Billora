@@ -15,7 +15,7 @@ import {
   SlidersHorizontal,
   X,
 } from "lucide-react";
-import React, { createContext, useCallback, useContext, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 /* -------------------------------------------------------------------------- */
 /* 1. MoneyDisplay — Tabular JetBrains Mono INR formatting                    */
@@ -576,8 +576,27 @@ export function DataTable<T>({
 }: DataTableProps<T>) {
   const [hiddenCols, setHiddenCols] = useState<Set<string>>(new Set());
   const [colMenuOpen, setColMenuOpen] = useState(false);
+  const [localSearch, setLocalSearch] = useState<string>(searchValue ?? "");
+  const onSearchChangeRef = useRef(onSearchChange);
+  onSearchChangeRef.current = onSearchChange;
 
-  const visibleColumns = columns.filter((c) => !hiddenCols.has(c.key));
+  useEffect(() => {
+    setLocalSearch(searchValue ?? "");
+  }, [searchValue]);
+
+  useEffect(() => {
+    if (!onSearchChangeRef.current) return;
+    if (localSearch === (searchValue ?? "")) return;
+    const timer = setTimeout(() => {
+      onSearchChangeRef.current?.(localSearch);
+    }, 220);
+    return () => clearTimeout(timer);
+  }, [localSearch, searchValue]);
+
+  const visibleColumns = useMemo(
+    () => columns.filter((c) => !hiddenCols.has(c.key)),
+    [columns, hiddenCols]
+  );
 
   return (
     <div className="rounded-lg border border-border bg-bg-base shadow-xs overflow-hidden">
@@ -589,8 +608,8 @@ export function DataTable<T>({
                 <Search className="pointer-events-none absolute left-2.5 top-2.5 h-3.5 w-3.5 text-text-muted" />
                 <input
                   type="search"
-                  value={searchValue ?? ""}
-                  onChange={(e) => onSearchChange(e.target.value)}
+                  value={localSearch}
+                  onChange={(e) => setLocalSearch(e.target.value)}
                   placeholder={searchPlaceholder}
                   className="h-8 w-full rounded-md border border-border bg-bg-base pl-8 pr-3 text-xs text-text-primary placeholder:text-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
                 />
@@ -668,8 +687,13 @@ export function DataTable<T>({
               ))}
             </tr>
           </thead>
-          <tbody className="divide-y divide-border text-xs">
-            {loading ? (
+          <tbody
+            className={cn(
+              "divide-y divide-border text-xs transition-opacity duration-150",
+              loading && data.length > 0 && "opacity-60 pointer-events-none"
+            )}
+          >
+            {loading && data.length === 0 ? (
               Array.from({ length: 6 }).map((_, idx) => (
                 <tr key={idx}>
                   {visibleColumns.map((col) => (

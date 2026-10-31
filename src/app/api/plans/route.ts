@@ -1,4 +1,5 @@
 import { toNumber2 } from "@/lib/money";
+import { getOrSetServerCache, invalidateServerCacheByPrefix } from "@/server/cache/query-cache";
 import { prisma } from "@/server/db/client";
 import { AppError, apiSuccess, handleApiError } from "@/server/errors";
 import { requireAuth } from "@/server/middlewares/auth";
@@ -20,25 +21,27 @@ function getPlanImages(): Record<string, string> {
 export async function GET(req: NextRequest) {
   try {
     await requireAuth(req);
-    const plans = await prisma.subscriptionPlan.findMany({
-      include: {
-        planProducts: {
-          include: { product: { include: { variants: true } } },
+    const formatted = await getOrSetServerCache("catalog:plans:all", 60_000, async () => {
+      const plans = await prisma.subscriptionPlan.findMany({
+        include: {
+          planProducts: {
+            include: { product: { include: { variants: true } } },
+          },
+          _count: {
+            select: { subscriptions: true },
+          },
         },
-        _count: {
-          select: { subscriptions: true },
-        },
-      },
-      orderBy: { createdAt: "desc" },
+        orderBy: { createdAt: "desc" },
+      });
+
+      const planImages = getPlanImages();
+
+      return plans.map((p) => ({
+        ...p,
+        basePrice: toNumber2(p.basePrice),
+        imageUrl: planImages[p.id] ?? null,
+      }));
     });
-
-    const planImages = getPlanImages();
-
-    const formatted = plans.map((p) => ({
-      ...p,
-      basePrice: toNumber2(p.basePrice),
-      imageUrl: planImages[p.id] ?? null,
-    }));
 
     return apiSuccess(formatted);
   } catch (error) {
@@ -51,6 +54,7 @@ export async function POST(req: NextRequest) {
     const session = await requireAuth(req, ["ADMIN"]);
     const body = await req.json();
     const plan = await CatalogService.createSubscriptionPlan(session, body);
+    invalidateServerCacheByPrefix("catalog:plans");
     return apiSuccess(plan, 201);
   } catch (error) {
     return handleApiError(error);
@@ -66,6 +70,7 @@ export async function PATCH(req: NextRequest) {
       throw new AppError("VALIDATION_ERROR", "Subscription plan ID is required", 400);
     }
     const plan = await CatalogService.updateSubscriptionPlan(session, id, rest);
+    invalidateServerCacheByPrefix("catalog:plans");
     return apiSuccess(plan);
   } catch (error) {
     return handleApiError(error);
@@ -81,6 +86,7 @@ export async function DELETE(req: NextRequest) {
       throw new AppError("VALIDATION_ERROR", "Subscription plan ID is required", 400);
     }
     const result = await CatalogService.deleteSubscriptionPlan(session, id);
+    invalidateServerCacheByPrefix("catalog:plans");
     return apiSuccess(result);
   } catch (error) {
     return handleApiError(error);

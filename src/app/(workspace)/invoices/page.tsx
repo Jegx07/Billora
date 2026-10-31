@@ -7,6 +7,7 @@ import {
   StatusBadge,
   useToast,
 } from "@/components/ui/Primitives";
+import { getClientCache, invalidateClientCache, setClientCache } from "@/lib/swr-cache";
 import { Download, Eye, Play } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -26,21 +27,33 @@ export default function InvoicesPage() {
   const [runningBilling, setRunningBilling] = useState(false);
 
   const loadInvoices = useCallback(async () => {
-    setLoading(true);
+    const qs = new URLSearchParams({
+      page: String(page),
+      pageSize: "20",
+      search,
+      ...(status ? { status } : {}),
+      ...(overdueOnly ? { overdue: "true" } : {}),
+    });
+    const cacheKey = `invoices:${qs.toString()}`;
+    const cached = getClientCache<{ data: any[]; totalPages: number; total: number }>(cacheKey, 20_000);
+    if (cached) {
+      setInvoices(cached.data);
+      setTotalPages(cached.totalPages);
+      setTotalRecords(cached.total);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
     try {
-      const qs = new URLSearchParams({
-        page: String(page),
-        pageSize: "20",
-        search,
-        ...(status ? { status } : {}),
-        ...(overdueOnly ? { overdue: "true" } : {}),
-      });
       const res = await fetch(`/api/invoices?${qs.toString()}`);
       const json = await res.json();
       if (json.success) {
+        const totalPagesVal = json.meta?.totalPages || 1;
+        const totalVal = json.meta?.total || json.data.length;
         setInvoices(json.data);
-        setTotalPages(json.meta?.totalPages || 1);
-        setTotalRecords(json.meta?.total || json.data.length);
+        setTotalPages(totalPagesVal);
+        setTotalRecords(totalVal);
+        setClientCache(cacheKey, { data: json.data, totalPages: totalPagesVal, total: totalVal });
       }
     } finally {
       setLoading(false);
@@ -67,6 +80,8 @@ export default function InvoicesPage() {
           description: `Generated ${run.generatedCount} new invoices (${run.skippedCount} duplicate/not-due skipped).`,
           variant: "success",
         });
+        invalidateClientCache("invoices:");
+        invalidateClientCache("dashboard:");
         loadInvoices();
       }
     } finally {

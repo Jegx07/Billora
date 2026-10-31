@@ -23,6 +23,29 @@ export interface AuthSessionContext {
 export const SESSION_COOKIE_NAME = "billora_session";
 export const SUPABASE_ACCESS_COOKIE_NAME = "sb-access-token";
 
+// Short-lived (15s TTL) session cache to eliminate redundant 4-table SQL joins across parallel API requests
+const SESSION_CACHE_TTL_MS = 15_000;
+const sessionCache = new Map<
+  string,
+  { context: AuthSessionContext; expiresAt: number; dbSessionExpiresAt: number }
+>();
+
+export function invalidateSessionCache(userIdOrSessionId?: string): void {
+  if (!userIdOrSessionId) {
+    sessionCache.clear();
+    return;
+  }
+  for (const [key, entry] of sessionCache.entries()) {
+    if (
+      entry.context.userId === userIdOrSessionId ||
+      entry.context.sessionId === userIdOrSessionId ||
+      key === userIdOrSessionId
+    ) {
+      sessionCache.delete(key);
+    }
+  }
+}
+
 /**
  * Cryptographic password hashing using Node.js native Scrypt (memory-hard KDF, RFC 7914)
  * with 16-byte random salt and timingSafeEqual comparison.
@@ -86,10 +109,14 @@ async function resolveSupabaseJwtSession(rawJwt: string): Promise<AuthSessionCon
 
   const dbUser = await prisma.user.findUnique({
     where: { email: sbUser.email.toLowerCase() },
-    include: {
-      role: true,
-      customer: true,
-      employee: true,
+    select: {
+      id: true,
+      email: true,
+      fullName: true,
+      status: true,
+      role: { select: { name: true } },
+      customer: { select: { id: true } },
+      employee: { select: { id: true } },
     },
   });
 
@@ -142,30 +169,45 @@ export async function getSessionFromRequest(req?: NextRequest): Promise<AuthSess
 
   if (rawToken) {
     const tokenHash = hashToken(rawToken);
+    const now = Date.now();
+    const cached = sessionCache.get(tokenHash);
+    if (cached && cached.expiresAt > now && cached.dbSessionExpiresAt > now) {
+      return cached.context;
+    }
+
     const session = await prisma.session.findUnique({
       where: { tokenHash },
-      include: {
+      select: {
+        id: true,
+        csrfToken: true,
+        expiresAt: true,
         user: {
-          include: {
-            role: true,
-            customer: true,
-            employee: true,
+          select: {
+            id: true,
+            email: true,
+            fullName: true,
+            status: true,
+            role: { select: { name: true } },
+            customer: { select: { id: true } },
+            employee: { select: { id: true } },
           },
         },
       },
     });
 
     if (session) {
-      if (session.expiresAt.getTime() < Date.now()) {
+      if (session.expiresAt.getTime() < now) {
+        sessionCache.delete(tokenHash);
         await prisma.session.delete({ where: { id: session.id } }).catch(() => undefined);
         return null;
       }
 
       if (session.user.status !== "ACTIVE") {
+        sessionCache.delete(tokenHash);
         throw new AppError("FORBIDDEN", `Account status is ${session.user.status}`, 403);
       }
 
-      return {
+      const context: AuthSessionContext = {
         userId: session.user.id,
         email: session.user.email,
         fullName: session.user.fullName,
@@ -176,6 +218,14 @@ export async function getSessionFromRequest(req?: NextRequest): Promise<AuthSess
         sessionId: session.id,
         authProvider: "CENTRALIZED_DB",
       };
+
+      sessionCache.set(tokenHash, {
+        context,
+        expiresAt: now + SESSION_CACHE_TTL_MS,
+        dbSessionExpiresAt: session.expiresAt.getTime(),
+      });
+
+      return context;
     }
 
     // If rawToken is a 3-segment JWT and Supabase is configured, verify via Supabase Auth

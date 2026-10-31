@@ -6,6 +6,7 @@ import {
   generateRandomToken,
   hashPassword,
   hashToken,
+  invalidateSessionCache,
   UserRole,
   verifyPassword,
 } from "@/server/middlewares/auth";
@@ -121,8 +122,8 @@ export class AuthService {
       where: { name: "CUSTOMER" },
     });
 
-    // Synchronize identity with Supabase Auth when configured (strictly CUSTOMER role)
-    await this.syncSupabaseIdentity({
+    // Synchronize identity with Supabase Auth asynchronously in the background (strictly CUSTOMER role)
+    void this.syncSupabaseIdentity({
       email: input.email,
       password: input.password,
       fullName: input.fullName,
@@ -307,8 +308,8 @@ export class AuthService {
       throw new AppError("FORBIDDEN", `Your account is currently ${user.status}`, 403);
     }
 
-    // Ensure existing user identity is also synced to Supabase Auth on login
-    await this.syncSupabaseIdentity({
+    // Ensure existing user identity is also synced to Supabase Auth asynchronously on login
+    void this.syncSupabaseIdentity({
       email: user.email,
       password: input.password,
       fullName: user.fullName,
@@ -350,6 +351,7 @@ export class AuthService {
   }
 
   static async logout(sessionId: string) {
+    invalidateSessionCache(sessionId);
     await prisma.session.deleteMany({ where: { id: sessionId } });
   }
 

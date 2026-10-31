@@ -1,6 +1,7 @@
 import type { PrismaClient as PrismaClientType } from "@prisma/client";
 import fs from "fs";
 import path from "path";
+import { invalidateServerCacheForModel } from "@/server/cache/query-cache";
 import { syncPrismaMutationToSupabase } from "@/server/db/supabase-sync";
 
 const DEFAULT_SQLITE_URL = "file:./dev.db";
@@ -31,46 +32,39 @@ if (!process.env.DATABASE_URL || !process.env.DATABASE_URL.trim()) {
 const resolvedDatabaseUrl = resolveDatabaseUrl(process.env.DATABASE_URL);
 
 const globalForPrisma = globalThis as unknown as {
-  prisma?: PrismaClientType;
-  prismaV2?: PrismaClientType;
-  prismaV3?: PrismaClientType;
-  prismaV4?: PrismaClientType;
-  prismaV5?: PrismaClientType;
+  prismaV6?: PrismaClientType;
+  sqlitePragmasApplied?: boolean;
 };
+
+const WRITE_ACTIONS = new Set([
+  "create",
+  "createMany",
+  "update",
+  "updateMany",
+  "upsert",
+  "delete",
+  "deleteMany",
+]);
+
+async function applySqlitePerformancePragmas(client: PrismaClientType) {
+  if (globalForPrisma.sqlitePragmasApplied || !resolvedDatabaseUrl.startsWith("file:")) {
+    return;
+  }
+  globalForPrisma.sqlitePragmasApplied = true;
+  try {
+    await client.$queryRawUnsafe("PRAGMA journal_mode = WAL;");
+    await client.$queryRawUnsafe("PRAGMA synchronous = NORMAL;");
+    await client.$queryRawUnsafe("PRAGMA temp_store = MEMORY;");
+    await client.$queryRawUnsafe("PRAGMA cache_size = -64000;");
+    await client.$queryRawUnsafe("PRAGMA busy_timeout = 5000;");
+  } catch {
+    // Ignore if database is not SQLite
+  }
+}
 
 function createPrismaClient(): PrismaClientType {
   if (!process.env.DATABASE_URL || !process.env.DATABASE_URL.trim()) {
     process.env.DATABASE_URL = resolvedDatabaseUrl;
-  }
-
-  // Disconnect any stale pre-env PrismaClient instances from earlier HMR cycles
-  for (const stale of [
-    globalForPrisma.prisma,
-    globalForPrisma.prismaV2,
-    globalForPrisma.prismaV3,
-    globalForPrisma.prismaV4,
-  ]) {
-    if (stale && typeof stale.$disconnect === "function") {
-      stale.$disconnect().catch(() => undefined);
-    }
-  }
-  globalForPrisma.prisma = undefined;
-  globalForPrisma.prismaV2 = undefined;
-  globalForPrisma.prismaV3 = undefined;
-  globalForPrisma.prismaV4 = undefined;
-
-  // Evict cached JS wrapper modules so the updated .prisma/client config is loaded
-  try {
-    for (const key of Object.keys(require.cache)) {
-      if (
-        (key.includes(".prisma") || key.includes("@prisma")) &&
-        key.endsWith(".js")
-      ) {
-        delete require.cache[key];
-      }
-    }
-  } catch {
-    // ignore if require.cache is unavailable
   }
 
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -78,38 +72,42 @@ function createPrismaClient(): PrismaClientType {
     PrismaClient: new (options?: Record<string, unknown>) => PrismaClientType;
   };
 
-  const client = new PrismaClient({
+  const baseClient = new PrismaClient({
     datasourceUrl: resolvedDatabaseUrl,
-    log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
+    log: process.env.NODE_ENV === "development" ? ["error"] : ["error"],
   });
 
-  // Register real-time Supabase synchronization middleware for all mutations
-  if (typeof (client as any).$use === "function") {
-    (client as any).$use(async (params: any, next: (p: any) => Promise<any>) => {
-      const result = await next(params);
-      if (
-        params.action === "create" ||
-        params.action === "update" ||
-        params.action === "upsert" ||
-        params.action === "delete"
-      ) {
-        await syncPrismaMutationToSupabase(
-          client,
-          params.model,
-          params.action,
-          params.args,
-          result
-        );
-      }
-      return result;
-    });
+  // Use Prisma v6 Client Extensions for zero-overhead cache invalidation & non-blocking Supabase sync
+  if (typeof (baseClient as any).$extends === "function") {
+    const extendedClient = (baseClient as any).$extends({
+      query: {
+        $allModels: {
+          async $allOperations({ model, operation, args, query }: any) {
+            const result = await query(args);
+            if (WRITE_ACTIONS.has(operation)) {
+              invalidateServerCacheForModel(model);
+              // Non-blocking background replication to Supabase (never delays local HTTP response)
+              const timer = setTimeout(() => {
+                void syncPrismaMutationToSupabase(baseClient, model, operation, args, result);
+              }, 0);
+              if (typeof timer.unref === "function") timer.unref();
+            }
+            return result;
+          },
+        },
+      },
+    }) as PrismaClientType;
+
+    void applySqlitePerformancePragmas(extendedClient);
+    return extendedClient;
   }
 
-  return client;
+  void applySqlitePerformancePragmas(baseClient);
+  return baseClient;
 }
 
-export const prisma: PrismaClientType = globalForPrisma.prismaV5 ?? createPrismaClient();
+export const prisma: PrismaClientType = globalForPrisma.prismaV6 ?? createPrismaClient();
 
 if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prismaV5 = prisma;
+  globalForPrisma.prismaV6 = prisma;
 }
