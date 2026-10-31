@@ -11,6 +11,8 @@ import {
 } from "@/server/middlewares/auth";
 import { AuditService } from "@/server/services/audit.service";
 import { NotificationService } from "@/server/services/notification.service";
+import { isSupabaseAdminConfigured, isSupabaseConfigured } from "@/lib/supabase/config";
+import { createAdminSupabaseClient, createPublicSupabaseClient } from "@/lib/supabase/client";
 import {
   createCustomerSchema,
   createEmployeeSchema,
@@ -43,6 +45,43 @@ const DEFAULT_DEMO_USERS: Record<
 };
 
 export class AuthService {
+  /**
+   * Synchronizes user creation with Supabase Auth (`auth.users`) when Supabase credentials are configured.
+   * Role assignment is strictly controlled by server-side logic (`app_metadata.role`).
+   */
+  private static async syncSupabaseIdentity(params: {
+    email: string;
+    password: string;
+    fullName: string;
+    role: UserRole;
+  }): Promise<string | null> {
+    try {
+      if (isSupabaseAdminConfigured()) {
+        const adminClient = createAdminSupabaseClient();
+        const created = await adminClient.adminCreateUser({
+          email: params.email,
+          password: params.password,
+          fullName: params.fullName,
+          role: params.role,
+          emailConfirm: true,
+        });
+        return created?.id ?? null;
+      }
+      if (isSupabaseConfigured() && params.role === "CUSTOMER") {
+        const pubClient = createPublicSupabaseClient();
+        if (pubClient) {
+          const signedUp = await pubClient.signUpWithPassword(params.email, params.password, {
+            full_name: params.fullName,
+          });
+          return signedUp.user?.id ?? null;
+        }
+      }
+    } catch {
+      // Fall back gracefully if remote Supabase instance is unreachable or user already exists in auth.users
+    }
+    return null;
+  }
+
   static async ensureRoles() {
     const roles: { name: UserRole; description: string }[] = [
       { name: "ADMIN", description: "Administrator with full platform access" },
@@ -77,6 +116,14 @@ export class AuthService {
       where: { name: "CUSTOMER" },
     });
 
+    // Synchronize identity with Supabase Auth when configured (strictly CUSTOMER role)
+    await this.syncSupabaseIdentity({
+      email: input.email,
+      password: input.password,
+      fullName: input.fullName,
+      role: "CUSTOMER",
+    });
+
     const passwordHash = hashPassword(input.password);
     const verificationToken = generateRandomToken(24);
     const customerCount = await prisma.customer.count();
@@ -102,26 +149,26 @@ export class AuthService {
 
       const customer = existingCustomer
         ? await tx.customer.update({
-          where: { id: existingCustomer.id },
-          data: {
-            userId: user.id,
-            contactName: input.fullName,
-            companyName: input.companyName ?? existingCustomer.companyName,
-            phone: input.phone ?? existingCustomer.phone,
-            gstin: input.gstin ?? existingCustomer.gstin,
-          },
-        })
+            where: { id: existingCustomer.id },
+            data: {
+              userId: user.id,
+              contactName: input.fullName,
+              companyName: input.companyName ?? existingCustomer.companyName,
+              phone: input.phone ?? existingCustomer.phone,
+              gstin: input.gstin ?? existingCustomer.gstin,
+            },
+          })
         : await tx.customer.create({
-          data: {
-            customerCode,
-            userId: user.id,
-            contactName: input.fullName,
-            companyName: input.companyName ?? null,
-            email: input.email,
-            phone: input.phone ?? null,
-            gstin: input.gstin ?? null,
-          },
-        });
+            data: {
+              customerCode,
+              userId: user.id,
+              contactName: input.fullName,
+              companyName: input.companyName ?? null,
+              email: input.email,
+              phone: input.phone ?? null,
+              gstin: input.gstin ?? null,
+            },
+          });
 
       const rawSessionToken = generateRandomToken(32);
       const csrfToken = generateRandomToken(16);
@@ -234,7 +281,20 @@ export class AuthService {
       }
     }
 
-    if (!user || !verifyPassword(input.password, user.passwordHash)) {
+    let passwordAuthenticated = Boolean(user && verifyPassword(input.password, user.passwordHash));
+
+    // When Supabase Auth is configured, also allow verifying credentials against Supabase Auth
+    if (!passwordAuthenticated && user && isSupabaseConfigured()) {
+      const pubClient = createPublicSupabaseClient();
+      if (pubClient) {
+        const sbSession = await pubClient.signInWithPassword(input.email, input.password);
+        if (sbSession.user && !sbSession.error) {
+          passwordAuthenticated = true;
+        }
+      }
+    }
+
+    if (!user || !passwordAuthenticated) {
       throw new AppError("UNAUTHORIZED", "Invalid email address or password", 401);
     }
 
@@ -376,6 +436,14 @@ export class AuthService {
       throw new AppError("CONFLICT", "An account with this email address already exists", 409);
     }
 
+    // Provision employee identity via privileged server-side Supabase Admin API when configured
+    await this.syncSupabaseIdentity({
+      email: input.email,
+      password: input.password,
+      fullName: input.fullName,
+      role: "EMPLOYEE",
+    });
+
     const employeeRole = await prisma.role.findUniqueOrThrow({ where: { name: "EMPLOYEE" } });
     const empCount = await prisma.employee.count();
     const employeeCode = `EMP-${String(empCount + 101).padStart(3, "0")}`;
@@ -445,6 +513,15 @@ export class AuthService {
     const existingUser = await prisma.user.findUnique({ where: { email: input.email } });
     if (existingUser) {
       throw new AppError("CONFLICT", "An account with this email address already exists", 409);
+    }
+
+    if (input.password) {
+      await this.syncSupabaseIdentity({
+        email: input.email,
+        password: input.password,
+        fullName: input.contactName,
+        role: "CUSTOMER",
+      });
     }
 
     const customerRole = await prisma.role.findUniqueOrThrow({ where: { name: "CUSTOMER" } });

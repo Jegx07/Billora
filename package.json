@@ -11,6 +11,8 @@
     "db:push": "prisma db push --accept-data-loss",
     "db:generate": "prisma generate",
     "seed:dev": "tsx prisma/seed.ts",
+    "db:migrate:supabase": "tsx scripts/migrate-to-supabase.ts",
+    "verify:supabase": "tsx scripts/verify-supabase-security.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },
