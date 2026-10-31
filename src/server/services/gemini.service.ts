@@ -16,16 +16,27 @@ export interface GeminiAssistantResult {
 export class GeminiService {
   private static readonly FALLBACK_MODELS = [
     "gemini-3.5-flash",
-    "gemini-3-flash-preview",
-    "gemini-3.1-flash-lite",
+    "gemini-3.5-flash-lite",
+    "gemini-flash-latest",
   ];
+
+  // Cached connectivity status to avoid hammering Google API on every page reload
+  private static cachedStatus: {
+    isConnected: boolean;
+    checkedAt: number;
+    error?: string;
+  } | null = null;
 
   /**
    * Checks whether a valid Gemini API key is configured in the environment.
    */
   static isAvailable(): boolean {
     const key = process.env.GEMINI_API_KEY;
-    return Boolean(key && key.trim().length > 10 && !key.includes("your-gemini-api-key"));
+    return Boolean(
+      key &&
+      key.trim().length > 10 &&
+      !key.includes("your-gemini-api-key")
+    );
   }
 
   /**
@@ -36,8 +47,76 @@ export class GeminiService {
   }
 
   /**
+   * Sanitizes any error message or string so API keys are never leaked to logs or clients.
+   */
+  private static sanitizeError(err: unknown): string {
+    const msg = err instanceof Error ? err.message : String(err);
+    const key = process.env.GEMINI_API_KEY?.trim();
+    if (key && key.length > 5) {
+      return msg.replaceAll(key, "[REDACTED_API_KEY]");
+    }
+    return msg;
+  }
+
+  /**
+   * Verifies live connectivity with Google Gemini API without exposing credentials.
+   * Caches result for 3 minutes for high performance.
+   */
+  static async checkConnectivity(): Promise<{
+    isConfigured: boolean;
+    isConnected: boolean;
+    model: string;
+    error?: string;
+  }> {
+    const isConfigured = this.isAvailable();
+    const model = this.getPrimaryModel();
+
+    if (!isConfigured) {
+      return {
+        isConfigured: false,
+        isConnected: false,
+        model,
+        error: "GEMINI_API_KEY is not configured in .env",
+      };
+    }
+
+    const now = Date.now();
+    if (this.cachedStatus && now - this.cachedStatus.checkedAt < 180000) {
+      return {
+        isConfigured: true,
+        isConnected: this.cachedStatus.isConnected,
+        model,
+        error: this.cachedStatus.error,
+      };
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY?.trim() || "";
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}?key=${apiKey}`;
+      const res = await fetch(url, {
+        method: "GET",
+        signal: AbortSignal.timeout(6000),
+      });
+
+      if (res.ok) {
+        this.cachedStatus = { isConnected: true, checkedAt: now };
+        return { isConfigured: true, isConnected: true, model };
+      } else {
+        const errText = await res.text();
+        const cleanErr = this.sanitizeError(`HTTP ${res.status}: ${errText}`);
+        this.cachedStatus = { isConnected: false, checkedAt: now, error: cleanErr };
+        return { isConfigured: true, isConnected: false, model, error: cleanErr };
+      }
+    } catch (err: unknown) {
+      const cleanErr = this.sanitizeError(err);
+      this.cachedStatus = { isConnected: false, checkedAt: now, error: cleanErr };
+      return { isConfigured: true, isConnected: false, model, error: cleanErr };
+    }
+  }
+
+  /**
    * Generates a precise, zero-hallucination financial response using Google Gemini
-   * grounded by live database metrics from PostgreSQL / Prisma.
+   * grounded strictly by live database metrics from PostgreSQL / SQLite via Prisma.
    */
   static async generateFinancialAnswer(
     session: AuthSessionContext,
@@ -50,7 +129,6 @@ export class GeminiService {
 
     const now = new Date();
     const weekAhead = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 
     // 1. Gather live, ground-truth financial context from the database
     const [ytdDashboard, mtdDashboard, overdueInvoices, upcomingRenewals] = await Promise.all([
@@ -60,6 +138,7 @@ export class GeminiService {
         where: {
           status: "CONFIRMED",
           outstandingAmount: { gt: 0 },
+          dueDate: { lt: now }, // True overdue invoices
         },
         include: { customer: true },
         orderBy: { outstandingAmount: "desc" },
@@ -135,11 +214,12 @@ CRITICAL RULES:
 1. ZERO HALLUCINATIONS: Do not guess, extrapolate, or invent financial figures. Every single number must come directly from the provided ground truth context.
 2. CURRENCY: Always format Indian Rupees using the '₹' symbol with appropriate commas (e.g. ₹1,20,000.00).
 3. TONE: Concise, authoritative, professional, and directly answers what was asked.
-4. JSON RESPONSE FORMAT: You must return a valid, parseable JSON object adhering strictly to this schema:
+4. OUT-OF-SCOPE QUESTIONS: If the user asks an unrelated, non-business question (e.g. general trivia, coding, casual conversation), politely explain that you are specialized in Billora's revenue intelligence, and guide them on what financial metrics you can answer.
+5. JSON RESPONSE FORMAT: You must return ONLY a valid, parseable JSON object adhering strictly to this schema:
 {
   "answer": "string containing the direct natural-language answer with clear formatting",
   "periodUsed": "string specifying the exact period (e.g., 'Current Year (2026)', 'Next 7 Days', etc.)",
-  "dataSource": "string describing the Prisma / PostgreSQL tables referenced",
+  "dataSource": "string describing the Prisma / Database tables referenced",
   "metrics": {
     "metricName": "number or formatted string"
   }
@@ -154,9 +234,10 @@ USER QUESTION:
 Generate the JSON response answering the question accurately using the data above.`;
 
     // Try primary model first, followed by fallbacks if necessary
+    const primary = this.getPrimaryModel();
     const modelsToTry = [
-      this.getPrimaryModel(),
-      ...this.FALLBACK_MODELS.filter((m) => m !== this.getPrimaryModel()),
+      primary,
+      ...this.FALLBACK_MODELS.filter((m) => m !== primary),
     ];
 
     let lastError: Error | null = null;
@@ -164,13 +245,11 @@ Generate the JSON response answering the question accurately using the data abov
     for (const model of modelsToTry) {
       try {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 9000);
 
         const res = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          signal: controller.signal,
+          signal: AbortSignal.timeout(15000),
           body: JSON.stringify({
             systemInstruction: {
               parts: [{ text: systemInstruction }],
@@ -183,39 +262,53 @@ Generate the JSON response answering the question accurately using the data abov
           }),
         });
 
-        clearTimeout(timeoutId);
-
         if (!res.ok) {
           const errBody = await res.text();
-          throw new Error(`Gemini API error ${res.status}: ${errBody}`);
+          throw new Error(`Gemini API error ${res.status}: ${this.sanitizeError(errBody)}`);
         }
 
         const data = await res.json();
-        const rawJsonText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        let rawJsonText = data.candidates?.[0]?.content?.parts?.[0]?.text;
         if (!rawJsonText) {
           throw new Error("Empty response from Gemini API");
         }
 
+        // Clean any markdown wrapper like ```json ... ```
+        rawJsonText = rawJsonText.trim();
+        if (rawJsonText.startsWith("```")) {
+          rawJsonText = rawJsonText.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
+        }
+
         const parsed = JSON.parse(rawJsonText);
 
-        // Ensure key metrics are present and guaranteed accurate
+        // Ensure key metrics are present and guaranteed mathematically exact
         const metrics: Record<string, string | number> = parsed.metrics || {};
 
-        // Always guarantee activeSubscriptions integer parity for specification tests
+        const qLower = question.toLowerCase();
         if (
-          question.toLowerCase().includes("subscription") ||
-          question.toLowerCase().includes("mrr") ||
+          qLower.includes("subscription") ||
+          qLower.includes("active") ||
           metrics.activeSubscriptions === undefined
         ) {
           metrics.activeSubscriptions = ytdDashboard.kpis.activeSubscriptions;
         }
-        if (question.toLowerCase().includes("mrr") && !metrics.mrr) {
+        if (qLower.includes("mrr") || qLower.includes("recurring") || qLower.includes("health") || qLower.includes("summary")) {
           metrics.mrr = formatINR(ytdDashboard.kpis.mrr);
+          metrics.arr = formatINR(ytdDashboard.kpis.arr);
+        }
+        if (qLower.includes("overdue") || qLower.includes("unpaid")) {
+          metrics.matchingInvoicesCount = overdueInvoices.length;
+          metrics.totalOutstandingINR = formatINR(totalOverdueAmount);
+        }
+        if (qLower.includes("renew") || qLower.includes("expire") || qLower.includes("week") || qLower.includes("7 days")) {
+          metrics.dueWithin7Days = upcomingRenewals.length;
+        }
+        if (qLower.includes("collected") || qLower.includes("this month") || qLower.includes("revenue")) {
+          metrics.cashCollectedThisMonth = formatINR(mtdDashboard.kpis.revenueCollected);
         }
 
         // Attach relevant records if applicable to the query
         let records: Record<string, unknown>[] | undefined;
-        const qLower = question.toLowerCase();
         if (qLower.includes("overdue") || qLower.includes("unpaid")) {
           records = groundTruthContext.overdueInvoicesList;
         } else if (qLower.includes("renew") || qLower.includes("expire") || qLower.includes("week")) {
@@ -228,14 +321,17 @@ Generate the JSON response answering the question accurately using the data abov
           question,
           answer: parsed.answer || "Query answered successfully.",
           periodUsed: parsed.periodUsed || ytdDashboard.period.label,
-          dataSource: `Google Gemini (${model}) • PostgreSQL / Prisma Live Aggregations`,
+          dataSource: `Google Gemini (${model}) • Live Database Aggregations`,
           metrics,
           records,
           modelUsed: model,
         };
-      } catch (err: any) {
-        lastError = err;
-        console.warn(`[GeminiService] Model ${model} failed, attempting fallback:`, err.message);
+      } catch (err: unknown) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+        console.warn(
+          `[GeminiService] Model ${model} failed, attempting fallback:`,
+          this.sanitizeError(lastError)
+        );
       }
     }
 
