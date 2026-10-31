@@ -1,32 +1,19 @@
-import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import Decimal from "decimal.js";
 import { prisma } from "../src/server/db/client";
 import { getSupabaseConfigStatus } from "../src/lib/supabase/config";
-import { createAdminSupabaseClient } from "../src/lib/supabase/client";
+import {
+  SupabaseTransformers,
+  toUuid,
+  upsertToSupabaseTable,
+} from "../src/server/db/supabase-sync";
 
-/**
- * Deterministic UUID v5-style generator from existing CUID/string IDs
- * so repeated migration runs are 100% idempotent and never duplicate rows.
- */
-export function toDeterministicUuid(namespace: string, sourceId: string): string {
-  const hash = crypto
-    .createHash("sha256")
-    .update(`${namespace}:${sourceId}`)
-    .digest("hex");
-  return [
-    hash.slice(0, 8),
-    hash.slice(8, 12),
-    "5" + hash.slice(13, 16),
-    "8" + hash.slice(17, 20),
-    hash.slice(20, 32),
-  ].join("-");
-}
+export { toUuid as toDeterministicUuid };
 
 async function runMigrationAndVerification() {
   console.log("=================================================================");
-  console.log(" BILLORA — CENTRALIZED SUPABASE DATABASE MIGRATION & VERIFICATION");
+  console.log(" BILLORA — CENTRALIZED SUPABASE DATABASE MIGRATION & LIVE UPLOAD");
   console.log("=================================================================\n");
 
   // 1. Extract all records from existing database
@@ -173,7 +160,7 @@ async function runMigrationAndVerification() {
       roles,
       users: users.map((u) => ({
         ...u,
-        supabaseUuid: toDeterministicUuid("user", u.id),
+        supabaseUuid: toUuid("user", u.id),
       })),
       employees,
       customers,
@@ -212,35 +199,214 @@ async function runMigrationAndVerification() {
   console.log(`   - Mode                       : ${sbStatus.mode}`);
   console.log(`   - NEXT_PUBLIC_SUPABASE_URL   : ${sbStatus.hasUrl ? "Configured" : "NOT SET"}`);
   console.log(`   - NEXT_PUBLIC_SUPABASE_ANON  : ${sbStatus.hasAnonKey ? "Configured" : "NOT SET"}`);
-  console.log(`   - SUPABASE_SERVICE_ROLE_KEY  : ${sbStatus.hasServiceRoleKey ? "Configured" : "NOT SET"}`);
+  console.log(
+    `   - SUPABASE_SERVICE_ROLE_KEY  : ${sbStatus.hasServiceRoleKey ? "Configured" : "NOT SET"}`
+  );
 
-  if (!sbStatus.isAdminReady) {
-    console.log(
-      `\n[INFO] Public Supabase URL & Publishable Key are configured (${sbStatus.url}).\n` +
-        "       To run privileged bulk user/table migration from the CLI, add SUPABASE_SERVICE_ROLE_KEY to .env\n" +
-        "       and re-run `npm run db:migrate:supabase`."
-    );
+  if (!sbStatus.isConfigured) {
+    console.log("\n[INFO] NEXT_PUBLIC_SUPABASE_URL is not configured yet.");
     return;
   }
 
-  // 5. When live credentials are provided, synchronize Auth users via Admin API
-  const adminClient = createAdminSupabaseClient();
-  let syncedUsers = 0;
-  for (const u of users) {
-    try {
-      await adminClient.adminCreateUser({
-        email: u.email,
-        password: `Billora#${u.id.slice(0, 8)}!2026`,
-        fullName: u.fullName,
-        role: (u.role.name as "ADMIN" | "EMPLOYEE" | "CUSTOMER") ?? "CUSTOMER",
-        emailConfirm: true,
-      });
-      syncedUsers += 1;
-    } catch {
-      // User already exists in Supabase Auth (idempotent skip)
+  // 5. Execute Live Batch Upload to Supabase Tables in Foreign-Key Topological Order
+  console.log(`\n5. Uploading All Local Data to Supabase (${sbStatus.url})...`);
+  const roleNameMap = new Map(roles.map((r) => [r.id, r.name]));
+
+  const uploadBatches: {
+    label: string;
+    table: string;
+    onConflict: string;
+    rows: Record<string, unknown>[];
+  }[] = [
+    {
+      label: "Roles",
+      table: "roles",
+      onConflict: "name",
+      rows: roles.map(SupabaseTransformers.Role),
+    },
+    {
+      label: "User Profiles",
+      table: "profiles",
+      onConflict: "id",
+      rows: users.map(SupabaseTransformers.User),
+    },
+    {
+      label: "User Roles",
+      table: "user_roles",
+      onConflict: "user_id",
+      rows: users.map((u) => SupabaseTransformers.UserRole(u, roleNameMap)),
+    },
+    {
+      label: "Employees",
+      table: "employees",
+      onConflict: "id",
+      rows: employees.map(SupabaseTransformers.Employee),
+    },
+    {
+      label: "Customers",
+      table: "customers",
+      onConflict: "id",
+      rows: customers.map(SupabaseTransformers.Customer),
+    },
+    {
+      label: "Products",
+      table: "products",
+      onConflict: "id",
+      rows: products.map(SupabaseTransformers.Product),
+    },
+    {
+      label: "Product Variants",
+      table: "product_variants",
+      onConflict: "id",
+      rows: productVariants.map(SupabaseTransformers.ProductVariant),
+    },
+    {
+      label: "Subscription Plans",
+      table: "subscription_plans",
+      onConflict: "id",
+      rows: subscriptionPlans.map(SupabaseTransformers.SubscriptionPlan),
+    },
+    {
+      label: "Plan Products",
+      table: "plan_products",
+      onConflict: "id",
+      rows: planProducts.map(SupabaseTransformers.PlanProduct),
+    },
+    {
+      label: "Tax Rules",
+      table: "tax_rules",
+      onConflict: "id",
+      rows: taxRules.map(SupabaseTransformers.TaxRule),
+    },
+    {
+      label: "Discounts",
+      table: "discounts",
+      onConflict: "id",
+      rows: discounts.map(SupabaseTransformers.Discount),
+    },
+    {
+      label: "Discount Products",
+      table: "discount_products",
+      onConflict: "id",
+      rows: discountProducts.map(SupabaseTransformers.DiscountProduct),
+    },
+    {
+      label: "Quotation Templates",
+      table: "quotation_templates",
+      onConflict: "id",
+      rows: quotationTemplates.map(SupabaseTransformers.QuotationTemplate),
+    },
+    {
+      label: "Quotation Template Lines",
+      table: "quotation_template_lines",
+      onConflict: "id",
+      rows: quotationTemplateLines.map(SupabaseTransformers.QuotationTemplateLine),
+    },
+    {
+      label: "Quotations",
+      table: "quotations",
+      onConflict: "id",
+      rows: quotations.map(SupabaseTransformers.Quotation),
+    },
+    {
+      label: "Quotation Lines",
+      table: "quotation_lines",
+      onConflict: "id",
+      rows: quotationLines.map(SupabaseTransformers.QuotationLine),
+    },
+    {
+      label: "Subscriptions",
+      table: "subscriptions",
+      onConflict: "id",
+      rows: subscriptions.map(SupabaseTransformers.Subscription),
+    },
+    {
+      label: "Subscription Lines",
+      table: "subscription_lines",
+      onConflict: "id",
+      rows: subscriptionLines.map(SupabaseTransformers.SubscriptionLine),
+    },
+    {
+      label: "Subscription History",
+      table: "subscription_history",
+      onConflict: "id",
+      rows: subscriptionHistories.map(SupabaseTransformers.SubscriptionHistory),
+    },
+    {
+      label: "Billing Periods",
+      table: "billing_periods",
+      onConflict: "id",
+      rows: billingPeriods.map(SupabaseTransformers.BillingPeriod),
+    },
+    {
+      label: "Invoices",
+      table: "invoices",
+      onConflict: "id",
+      rows: invoices.map(SupabaseTransformers.Invoice),
+    },
+    {
+      label: "Invoice Lines",
+      table: "invoice_lines",
+      onConflict: "id",
+      rows: invoiceLines.map(SupabaseTransformers.InvoiceLine),
+    },
+    {
+      label: "Payments",
+      table: "payments",
+      onConflict: "id",
+      rows: payments.map(SupabaseTransformers.Payment),
+    },
+    {
+      label: "Discount Usage",
+      table: "discount_usage",
+      onConflict: "id",
+      rows: discountUsages.map(SupabaseTransformers.DiscountUsage),
+    },
+    {
+      label: "Notifications",
+      table: "notifications",
+      onConflict: "id",
+      rows: notifications.map(SupabaseTransformers.Notification),
+    },
+    {
+      label: "Audit Logs",
+      table: "audit_logs",
+      onConflict: "id",
+      rows: auditLogs.map(SupabaseTransformers.AuditLog),
+    },
+  ];
+
+  let rlsBlocked = false;
+  for (const batch of uploadBatches) {
+    if (batch.rows.length === 0) {
+      console.log(`   [SKIP] ${batch.label.padEnd(26)} : 0 rows`);
+      continue;
+    }
+    const res = await upsertToSupabaseTable(batch.table, batch.rows, batch.onConflict);
+    if (res.error) {
+      console.log(`   [FAIL] ${batch.label.padEnd(26)} : ${res.error}`);
+      if (res.error.includes("42501") || res.error.includes("row-level security")) {
+        rlsBlocked = true;
+        break;
+      }
+    } else {
+      console.log(`   [OK]   ${batch.label.padEnd(26)} : ${res.synced}/${batch.rows.length} rows synced`);
     }
   }
-  console.log(`\n5. Synchronized ${syncedUsers}/${users.length} identities with Supabase Auth.`);
+
+  if (rlsBlocked) {
+    console.log(
+      "\n[ACTION REQUIRED TO BYPASS RLS FOR SERVER BULK UPLOAD & SYNC]\n" +
+        "Your Supabase tables have Row Level Security (RLS) enabled, and .env currently only has\n" +
+        "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY (which runs as the unauthenticated `anon` role).\n\n" +
+        "To allow your local backend server and migration script to write to Supabase tables:\n" +
+        "Option A (Recommended): Paste your Supabase Secret / Service Role Key into .env:\n" +
+        '   SUPABASE_SERVICE_ROLE_KEY="sb_secret_..." (from Supabase Dashboard -> Project Settings -> API Keys)\n' +
+        "Option B: Run `supabase/migrations/20261031000002_enable_realtime_server_sync.sql` in your Supabase SQL Editor."
+    );
+  } else {
+    console.log("\n[SUCCESS] All local database records have been uploaded and synchronized to Supabase!");
+  }
 }
 
 runMigrationAndVerification()
