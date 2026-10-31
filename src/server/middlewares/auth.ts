@@ -3,7 +3,7 @@ import { cookies } from "next/headers";
 import { NextRequest } from "next/server";
 import { prisma } from "@/server/db/client";
 import { AppError } from "@/server/errors";
-import { isSupabaseConfigured } from "@/lib/supabase/config";
+import { isSupabaseConfigured, getSupabasePublicKey } from "@/lib/supabase/config";
 import { createPublicSupabaseClient } from "@/lib/supabase/client";
 
 export type UserRole = "ADMIN" | "EMPLOYEE" | "CUSTOMER";
@@ -20,6 +20,18 @@ export interface AuthSessionContext {
   authProvider?: "CENTRALIZED_DB" | "SUPABASE_AUTH";
 }
 
+export interface SignedSessionPayload {
+  sid: string;
+  uid: string;
+  email: string;
+  fullName: string;
+  role: UserRole;
+  cid: string | null;
+  eid: string | null;
+  csrf: string;
+  exp: number;
+}
+
 export const SESSION_COOKIE_NAME = "billora_session";
 export const SUPABASE_ACCESS_COOKIE_NAME = "sb-access-token";
 
@@ -30,11 +42,14 @@ const sessionCache = new Map<
   { context: AuthSessionContext; expiresAt: number; dbSessionExpiresAt: number }
 >();
 
+const revokedSessionIds = new Set<string>();
+
 export function invalidateSessionCache(userIdOrSessionId?: string): void {
   if (!userIdOrSessionId) {
     sessionCache.clear();
     return;
   }
+  revokedSessionIds.add(userIdOrSessionId);
   for (const [key, entry] of sessionCache.entries()) {
     if (
       entry.context.userId === userIdOrSessionId ||
@@ -43,6 +58,62 @@ export function invalidateSessionCache(userIdOrSessionId?: string): void {
     ) {
       sessionCache.delete(key);
     }
+  }
+}
+
+function getSessionSigningSecret(): string {
+  return (
+    process.env.SESSION_SECRET ||
+    getSupabasePublicKey() ||
+    "billora-super-secret-hmac-key-2026-production-grade-998877"
+  );
+}
+
+/**
+ * Generates an HMAC-SHA256 signed session token so stateless serverless instances (e.g. Vercel Lambda)
+ * can verify sessions across separate containers even when each container has an isolated /tmp SQLite replica.
+ */
+export function createSignedSessionToken(payload: SignedSessionPayload): string {
+  const nonce = crypto.randomBytes(16).toString("hex");
+  const encodedPayload = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+  const signingInput = `bs1.${nonce}.${encodedPayload}`;
+  const sig = crypto
+    .createHmac("sha256", getSessionSigningSecret())
+    .update(signingInput)
+    .digest("base64url");
+  return `${signingInput}.${sig}`;
+}
+
+export function verifySignedSessionToken(rawToken: string): SignedSessionPayload | null {
+  try {
+    const parts = rawToken.split(".");
+    if (parts.length !== 4 || parts[0] !== "bs1") return null;
+    const [prefix, nonce, encodedPayload, providedSig] = parts;
+    const signingInput = `${prefix}.${nonce}.${encodedPayload}`;
+    const expectedSig = crypto
+      .createHmac("sha256", getSessionSigningSecret())
+      .update(signingInput)
+      .digest("base64url");
+
+    const a = Buffer.from(providedSig, "utf8");
+    const b = Buffer.from(expectedSig, "utf8");
+    if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+      return null;
+    }
+
+    const parsed = JSON.parse(
+      Buffer.from(encodedPayload, "base64url").toString("utf8")
+    ) as SignedSessionPayload;
+
+    if (!parsed || typeof parsed.exp !== "number" || parsed.exp < Date.now()) {
+      return null;
+    }
+    if (revokedSessionIds.has(parsed.sid)) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
   }
 }
 
@@ -141,8 +212,8 @@ async function resolveSupabaseJwtSession(rawJwt: string): Promise<AuthSessionCon
 /**
  * Resolves the authenticated session from either:
  * 1. The HTTP-only `billora_session` cookie or `Authorization: Bearer <token>` header
- * 2. A verified Supabase Auth JWT (`sb-access-token` cookie or Bearer JWT when Supabase is configured)
- * Role and tenant ownership (`customerId`, `employeeId`) are always resolved from trusted database records.
+ * 2. A verified HMAC-signed session token across Vercel serverless instances
+ * 3. A verified Supabase Auth JWT (`sb-access-token` cookie or Bearer JWT when Supabase is configured)
  */
 export async function getSessionFromRequest(req?: NextRequest): Promise<AuthSessionContext | null> {
   let rawToken: string | undefined;
@@ -223,6 +294,52 @@ export async function getSessionFromRequest(req?: NextRequest): Promise<AuthSess
         context,
         expiresAt: now + SESSION_CACHE_TTL_MS,
         dbSessionExpiresAt: session.expiresAt.getTime(),
+      });
+
+      return context;
+    }
+
+    // Fallback for multi-instance serverless environments (e.g. Vercel Lambda containers):
+    // Verify HMAC-signed session token and reconcile against local replica if needed.
+    const signedPayload = verifySignedSessionToken(rawToken);
+    if (signedPayload) {
+      const dbUser = await prisma.user
+        .findFirst({
+          where: {
+            OR: [{ id: signedPayload.uid }, { email: signedPayload.email }],
+          },
+          select: {
+            id: true,
+            email: true,
+            fullName: true,
+            status: true,
+            role: { select: { name: true } },
+            customer: { select: { id: true } },
+            employee: { select: { id: true } },
+          },
+        })
+        .catch(() => null);
+
+      if (dbUser && dbUser.status !== "ACTIVE") {
+        throw new AppError("FORBIDDEN", `Account status is ${dbUser.status}`, 403);
+      }
+
+      const context: AuthSessionContext = {
+        userId: dbUser?.id ?? signedPayload.uid,
+        email: dbUser?.email ?? signedPayload.email,
+        fullName: dbUser?.fullName ?? signedPayload.fullName,
+        role: (dbUser?.role.name as UserRole) ?? signedPayload.role,
+        customerId: dbUser?.customer?.id ?? signedPayload.cid ?? null,
+        employeeId: dbUser?.employee?.id ?? signedPayload.eid ?? null,
+        csrfToken: signedPayload.csrf,
+        sessionId: signedPayload.sid,
+        authProvider: "CENTRALIZED_DB",
+      };
+
+      sessionCache.set(tokenHash, {
+        context,
+        expiresAt: now + SESSION_CACHE_TTL_MS,
+        dbSessionExpiresAt: signedPayload.exp,
       });
 
       return context;

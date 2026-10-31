@@ -39,6 +39,10 @@ function isNonEmptySecret(val?: string | null): val is string {
   return trimmed.length > 0 && !PLACEHOLDER_VALUES.has(trimmed.toLowerCase());
 }
 
+const DEFAULT_PUBLIC_SUPABASE_URL = "https://ahhudqmffgzfomcncloo.supabase.co";
+const DEFAULT_PUBLIC_SUPABASE_PUBLISHABLE_KEY =
+  "sb_publishable_f3uAqoUHQoaKnwxPNn6QzA_mQwkN6X_";
+
 function ensureServerEnvLoaded() {
   if (typeof window !== "undefined") return;
   if (
@@ -49,27 +53,30 @@ function ensureServerEnvLoaded() {
     return;
   }
   try {
-    // Dynamically read .env so running dev servers pick up newly added Supabase keys without restart
+    // Dynamically read .env / .env.production so running servers pick up Supabase keys
     const fs = require("fs");
     const path = require("path");
-    const envPath = path.resolve(process.cwd(), ".env");
-    if (fs.existsSync(envPath)) {
-      const content = fs.readFileSync(envPath, "utf8");
-      for (const line of content.split(/\r?\n/)) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith("#")) continue;
-        const eqIdx = trimmed.indexOf("=");
-        if (eqIdx === -1) continue;
-        const key = trimmed.slice(0, eqIdx).trim();
-        let val = trimmed.slice(eqIdx + 1).trim();
-        if (
-          (val.startsWith('"') && val.endsWith('"')) ||
-          (val.startsWith("'") && val.endsWith("'"))
-        ) {
-          val = val.slice(1, -1);
-        }
-        if (!isNonEmptySecret(process.env[key]) && val) {
-          process.env[key] = val;
+    const candidateFiles = [".env", ".env.local", ".env.production"];
+    for (const filename of candidateFiles) {
+      const envPath = path.resolve(process.cwd(), filename);
+      if (fs.existsSync(envPath)) {
+        const content = fs.readFileSync(envPath, "utf8");
+        for (const line of content.split(/\r?\n/)) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith("#")) continue;
+          const eqIdx = trimmed.indexOf("=");
+          if (eqIdx === -1) continue;
+          const key = trimmed.slice(0, eqIdx).trim();
+          let val = trimmed.slice(eqIdx + 1).trim();
+          if (
+            (val.startsWith('"') && val.endsWith('"')) ||
+            (val.startsWith("'") && val.endsWith("'"))
+          ) {
+            val = val.slice(1, -1);
+          }
+          if (!isNonEmptySecret(process.env[key]) && val) {
+            process.env[key] = val;
+          }
         }
       }
     }
@@ -89,14 +96,16 @@ export function getSupabasePublicKey(): string {
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (isNonEmptySecret(anon)) return anon.trim();
 
-  return "";
+  return DEFAULT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 }
 
 export function getSupabaseUrl(): string | null {
   ensureServerEnvLoaded();
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  if (!isNonEmptySecret(url)) return null;
-  return url.trim().replace(/\/+$/, "");
+  if (isNonEmptySecret(url)) {
+    return url.trim().replace(/\/+$/, "");
+  }
+  return DEFAULT_PUBLIC_SUPABASE_URL;
 }
 
 /**

@@ -12,11 +12,16 @@
 .env
 .env*.local
 
-# Local SQLite database files
-prisma/*.db
-prisma/*.db-journal
+# Local SQLite database files (keep seeded prisma/dev.db snapshot for Vercel serverless deployment)
 *.db
+prisma/*.db
+!prisma/dev.db
 *.db-journal
+*.db-wal
+*.db-shm
+prisma/*.db-journal
+prisma/*.db-wal
+prisma/*.db-shm
 
 # Logs & OS files
 npm-debug.log*

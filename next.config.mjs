@@ -3,6 +3,10 @@ const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
   compress: true,
+  outputFileTracingIncludes: {
+    "/api/**/*": ["./prisma/dev.db", "./prisma/schema.prisma"],
+    "/**/*": ["./prisma/dev.db"],
+  },
   experimental: {
     optimizePackageImports: ["lucide-react", "recharts"],
   },

@@ -3,6 +3,7 @@ import { AppError } from "@/server/errors";
 import {
   assertCustomerAccess,
   AuthSessionContext,
+  createSignedSessionToken,
   generateRandomToken,
   hashPassword,
   hashToken,
@@ -122,13 +123,18 @@ export class AuthService {
       where: { name: "CUSTOMER" },
     });
 
-    // Synchronize identity with Supabase Auth asynchronously in the background (strictly CUSTOMER role)
-    void this.syncSupabaseIdentity({
+    // Synchronize identity with Supabase Auth (awaited on serverless so Lambda does not freeze early)
+    const syncPromise = this.syncSupabaseIdentity({
       email: input.email,
       password: input.password,
       fullName: input.fullName,
       role: "CUSTOMER",
     });
+    if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+      await Promise.race([syncPromise, new Promise((resolve) => setTimeout(resolve, 2500))]).catch(
+        () => null
+      );
+    }
 
     const passwordHash = hashPassword(input.password);
     const verificationToken = generateRandomToken(24);
@@ -176,14 +182,28 @@ export class AuthService {
             },
           });
 
-      const rawSessionToken = generateRandomToken(32);
       const csrfToken = generateRandomToken(16);
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      const sessionId = `sess_${generateRandomToken(12)}`;
+      const rawSessionToken = createSignedSessionToken({
+        sid: sessionId,
+        uid: user.id,
+        email: user.email,
+        fullName: user.fullName,
+        role: "CUSTOMER",
+        cid: customer.id,
+        eid: null,
+        csrf: csrfToken,
+        exp: expiresAt.getTime(),
+      });
+
       const session = await tx.session.create({
         data: {
+          id: sessionId,
           tokenHash: hashToken(rawSessionToken),
           csrfToken,
           userId: user.id,
-          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+          expiresAt,
         },
       });
 
@@ -290,12 +310,64 @@ export class AuthService {
     let passwordAuthenticated = Boolean(user && verifyPassword(input.password, user.passwordHash));
 
     // When Supabase Auth is configured, also allow verifying credentials against Supabase Auth
-    if (!passwordAuthenticated && user && isSupabaseConfigured()) {
+    // and auto-hydrating users who registered on another serverless instance into local Prisma.
+    if (!passwordAuthenticated && isSupabaseConfigured()) {
       const pubClient = createPublicSupabaseClient();
       if (pubClient) {
         const sbSession = await pubClient.signInWithPassword(input.email, input.password);
         if (sbSession.user && !sbSession.error) {
           passwordAuthenticated = true;
+          if (!user) {
+            await this.ensureRoles();
+            const metaRoleRaw = String(
+              sbSession.user.app_metadata?.role ||
+                sbSession.user.user_metadata?.role ||
+                "CUSTOMER"
+            ).toUpperCase();
+            const resolvedRole: UserRole =
+              metaRoleRaw === "ADMIN" || metaRoleRaw === "EMPLOYEE" ? metaRoleRaw : "CUSTOMER";
+            const roleRec = await prisma.role.findUniqueOrThrow({ where: { name: resolvedRole } });
+            const fullName =
+              String(
+                sbSession.user.user_metadata?.full_name || input.email.split("@")[0]
+              ).trim() || "Billora User";
+
+            user = await prisma.user.create({
+              data: {
+                email: input.email,
+                fullName,
+                passwordHash: hashPassword(input.password),
+                roleId: roleRec.id,
+                status: "ACTIVE",
+                emailVerifiedAt: new Date(),
+              },
+              include: {
+                role: true,
+                customer: true,
+                employee: true,
+              },
+            });
+
+            if (resolvedRole === "CUSTOMER" && !user.customer) {
+              const existingCustomer = await prisma.customer.findUnique({
+                where: { email: input.email },
+              });
+              const cust = existingCustomer
+                ? await prisma.customer.update({
+                    where: { id: existingCustomer.id },
+                    data: { userId: user.id },
+                  })
+                : await prisma.customer.create({
+                    data: {
+                      customerCode: `CUST-${String((await prisma.customer.count()) + 1001).padStart(4, "0")}`,
+                      userId: user.id,
+                      contactName: fullName,
+                      email: input.email,
+                    },
+                  });
+              user = { ...user, customer: cust };
+            }
+          }
         }
       }
     }
@@ -308,26 +380,45 @@ export class AuthService {
       throw new AppError("FORBIDDEN", `Your account is currently ${user.status}`, 403);
     }
 
-    // Ensure existing user identity is also synced to Supabase Auth asynchronously on login
-    void this.syncSupabaseIdentity({
+    // Ensure existing user identity is also synced to Supabase Auth on login
+    const syncLoginPromise = this.syncSupabaseIdentity({
       email: user.email,
       password: input.password,
       fullName: user.fullName,
       role: user.role.name as UserRole,
     });
+    if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+      await Promise.race([
+        syncLoginPromise,
+        new Promise((resolve) => setTimeout(resolve, 2500)),
+      ]).catch(() => null);
+    }
 
-    const rawSessionToken = generateRandomToken(32);
     const csrfToken = generateRandomToken(16);
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const sessionId = `sess_${generateRandomToken(12)}`;
+    const rawSessionToken = createSignedSessionToken({
+      sid: sessionId,
+      uid: user.id,
+      email: user.email,
+      fullName: user.fullName,
+      role: user.role.name as UserRole,
+      cid: user.customer?.id ?? null,
+      eid: user.employee?.id ?? null,
+      csrf: csrfToken,
+      exp: expiresAt.getTime(),
+    });
 
     await prisma.$transaction([
       prisma.session.create({
         data: {
+          id: sessionId,
           tokenHash: hashToken(rawSessionToken),
           csrfToken,
           userId: user.id,
           ipAddress: ipAddress ?? null,
           userAgent: userAgent ?? null,
-          expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+          expiresAt,
         },
       }),
       prisma.user.update({
