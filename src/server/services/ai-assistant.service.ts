@@ -3,6 +3,7 @@ import { prisma } from "@/server/db/client";
 import { AppError } from "@/server/errors";
 import { AuthSessionContext } from "@/server/middlewares/auth";
 import { AnalyticsService } from "@/server/services/analytics.service";
+import { GeminiService } from "@/server/services/gemini.service";
 
 export interface AssistantAnswer {
   question: string;
@@ -11,14 +12,18 @@ export interface AssistantAnswer {
   dataSource: string;
   metrics: Record<string, string | number>;
   records?: Record<string, unknown>[];
+  aiPowered?: boolean;
+  modelUsed?: string;
 }
 
 export class AiAssistantService {
   /**
    * Read-only, RBAC-scoped Business Intelligence Assistant (Section 18 of SPEC.md).
+   * - Powered by Google Gemini AI when GEMINI_API_KEY is configured.
    * - Never invents financial numbers; every response is computed directly from live database queries.
    * - Respects user permissions (only ADMIN and EMPLOYEE allowed; CUSTOMER blocked from global data).
    * - Always reports the exact calculation period and database source used.
+   * - Seamlessly falls back to deterministic local SQL aggregations if AI is unavailable.
    */
   static async answerQuery(session: AuthSessionContext, rawQuestion: string): Promise<AssistantAnswer> {
     if (session.role !== "ADMIN" && session.role !== "EMPLOYEE") {
@@ -29,13 +34,46 @@ export class AiAssistantService {
       );
     }
 
+    // 1. If Gemini AI is configured, generate accurate intelligence via Gemini
+    if (GeminiService.isAvailable()) {
+      try {
+        const geminiResult = await GeminiService.generateFinancialAnswer(session, rawQuestion);
+        return {
+          question: geminiResult.question,
+          answer: geminiResult.answer,
+          periodUsed: geminiResult.periodUsed,
+          dataSource: geminiResult.dataSource,
+          metrics: geminiResult.metrics,
+          records: geminiResult.records,
+          aiPowered: true,
+          modelUsed: geminiResult.modelUsed,
+        };
+      } catch (err: any) {
+        console.warn(
+          "[AiAssistantService] Gemini intelligence error, falling back to deterministic SQL engine:",
+          err?.message
+        );
+      }
+    }
+
+    // 2. Deterministic Local SQL Fallback Engine (Zero-Downtime Guarantee)
+    return this.answerWithDeterministicEngine(session, rawQuestion);
+  }
+
+  /**
+   * Deterministic local fallback query engine.
+   */
+  private static async answerWithDeterministicEngine(
+    session: AuthSessionContext,
+    rawQuestion: string
+  ): Promise<AssistantAnswer> {
     const q = rawQuestion.trim().toLowerCase();
     const now = new Date();
     const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
     const weekAhead = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
     const periodLabel = `${monthStart.toISOString().slice(0, 10)} to ${now.toISOString().slice(0, 10)} (UTC)`;
 
-    // 1. Overdue Invoices / Unpaid Customers
+    // Overdue Invoices / Unpaid Customers
     if (q.includes("overdue") || q.includes("unpaid")) {
       const overdueInvoices = await prisma.invoice.findMany({
         where: {
@@ -68,7 +106,7 @@ export class AiAssistantService {
                 .toISOString()
                 .slice(0, 10)}.`,
         periodUsed: `As of ${now.toISOString().slice(0, 10)} (Read-Only Live Snapshot)`,
-        dataSource: "PostgreSQL / Prisma `Invoice` + `Customer` (Read-Only)",
+        dataSource: "PostgreSQL / Prisma `Invoice` + `Customer` (Read-Only Fallback)",
         metrics: {
           matchingInvoicesCount: overdueInvoices.length,
           totalOutstandingINR: formatINR(totalUnpaid),
@@ -79,10 +117,11 @@ export class AiAssistantService {
           dueDate: inv.dueDate.toISOString().slice(0, 10),
           outstandingAmount: formatINR(inv.outstandingAmount),
         })),
+        aiPowered: false,
       };
     }
 
-    // 2. Subscriptions expiring / renewing this week
+    // Subscriptions expiring / renewing this week
     if (q.includes("expire") || q.includes("week") || q.includes("renew")) {
       const expiringSubs = await prisma.subscription.findMany({
         where: {
@@ -103,7 +142,7 @@ export class AiAssistantService {
           .toISOString()
           .slice(0, 10)} to ${weekAhead.toISOString().slice(0, 10)}).`,
         periodUsed: `${now.toISOString().slice(0, 10)} to ${weekAhead.toISOString().slice(0, 10)}`,
-        dataSource: "PostgreSQL / Prisma `Subscription` + `SubscriptionPlan` (Read-Only)",
+        dataSource: "PostgreSQL / Prisma `Subscription` + `SubscriptionPlan` (Read-Only Fallback)",
         metrics: {
           dueWithin7Days: expiringSubs.length,
         },
@@ -114,10 +153,11 @@ export class AiAssistantService {
           nextBillingDate: s.nextBillingDate.toISOString().slice(0, 10),
           amount: formatINR(s.totalAmount),
         })),
+        aiPowered: false,
       };
     }
 
-    // 3. Which subscription plan generates the most revenue?
+    // Top subscription plan by revenue
     if (q.includes("plan") && (q.includes("most") || q.includes("top") || q.includes("revenue"))) {
       const dashboard = await AnalyticsService.getDashboardMetrics(session, {
         preset: "CURRENT_YEAR",
@@ -132,17 +172,18 @@ export class AiAssistantService {
             )} across ${topPlan.subscriptions} subscriptions.`
           : "No active subscription plan revenue recorded yet.",
         periodUsed: dashboard.period.label,
-        dataSource: "PostgreSQL / Prisma `Subscription.groupBy(planId)` (Read-Only)",
+        dataSource: "PostgreSQL / Prisma `Subscription.groupBy(planId)` (Read-Only Fallback)",
         metrics: {
           topPlanName: topPlan?.planName ?? "N/A",
           topPlanSubscriptions: topPlan?.subscriptions ?? 0,
           topPlanRevenue: formatINR(topPlan?.revenue ?? 0),
         },
         records: dashboard.charts.revenueByPlan,
+        aiPowered: false,
       };
     }
 
-    // 4. Collected revenue this month
+    // Collected revenue this month
     if (q.includes("collected") || q.includes("this month")) {
       const monthDashboard = await AnalyticsService.getDashboardMetrics(session, {
         preset: "CURRENT_MONTH",
@@ -156,12 +197,13 @@ export class AiAssistantService {
           monthDashboard.kpis.invoicedRevenue
         )} invoiced and ${formatINR(monthDashboard.kpis.recognizedRevenue)} in recognized revenue.`,
         periodUsed: `${monthDashboard.period.startDate.slice(0, 10)} to ${monthDashboard.period.endDate.slice(0, 10)}`,
-        dataSource: "PostgreSQL / Prisma `Payment.aggregate` & `Invoice.aggregate` (Read-Only)",
+        dataSource: "PostgreSQL / Prisma `Payment.aggregate` & `Invoice.aggregate` (Read-Only Fallback)",
         metrics: {
           cashCollectedThisMonth: formatINR(monthDashboard.kpis.revenueCollected),
           invoicedThisMonth: formatINR(monthDashboard.kpis.invoicedRevenue),
           recognizedThisMonth: formatINR(monthDashboard.kpis.recognizedRevenue),
         },
+        aiPowered: false,
       };
     }
 
@@ -184,15 +226,16 @@ export class AiAssistantService {
         dashboard.kpis.overdueInvoicesCount
       } overdue invoices totaling ${formatINR(dashboard.kpis.overdueRevenue)}).`,
       periodUsed: periodLabel,
-      dataSource: "PostgreSQL / Prisma Executive Aggregations (Read-Only)",
+      dataSource: "PostgreSQL / Prisma Executive Aggregations (Read-Only Fallback)",
       metrics: {
         activeSubscriptions: dashboard.kpis.activeSubscriptions,
         totalCustomers: dashboard.kpis.totalCustomers,
-        MRR: formatINR(dashboard.kpis.mrr),
-        ARR: formatINR(dashboard.kpis.arr),
+        mrr: formatINR(dashboard.kpis.mrr),
+        arr: formatINR(dashboard.kpis.arr),
         cashCollectedYTD: formatINR(dashboard.kpis.revenueCollected),
         outstandingBalance: formatINR(dashboard.kpis.outstandingRevenue),
       },
+      aiPowered: false,
     };
   }
 }
