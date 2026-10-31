@@ -8,14 +8,14 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
-    await requireAuth(req, ["ADMIN", "EMPLOYEE"]);
+    const session = await requireAuth(req, ["ADMIN", "EMPLOYEE"]);
     const { id } = await params;
     let payload = {};
     try {
       payload = await req.json();
     } catch {}
 
-    const result = await WorkflowEngineService.executeWorkflowTest(id, payload);
+    const result = await WorkflowEngineService.executeWorkflowTest(id, payload, session);
     return apiSuccess(result);
   } catch (error) {
     return handleApiError(error);

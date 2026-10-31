@@ -2,6 +2,7 @@ import { prisma } from "@/server/db/client";
 import { apiSuccess, handleApiError } from "@/server/errors";
 import { requireAuth } from "@/server/middlewares/auth";
 import { AuthService } from "@/server/services/auth.service";
+import { WorkflowEngineService } from "@/server/services/workflow-engine.service";
 import { NextRequest } from "next/server";
 
 export async function GET(req: NextRequest) {
@@ -61,6 +62,11 @@ export async function POST(req: NextRequest) {
     const session = await requireAuth(req, ["ADMIN", "EMPLOYEE"]);
     const body = await req.json();
     const customer = await AuthService.createCustomer(session, body);
+    void WorkflowEngineService.emitEvent(
+      "CUSTOMER_CREATED",
+      { customerId: customer.id },
+      `cust_created_${customer.id}`
+    ).catch(() => {});
     return apiSuccess(customer, 201);
   } catch (error) {
     return handleApiError(error);
