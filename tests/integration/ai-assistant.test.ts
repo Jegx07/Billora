@@ -65,6 +65,9 @@ describe("Billora — AI Business Assistant & Gemini Production Verification", (
       email: adminUser.email,
       fullName: adminUser.fullName,
       role: "ADMIN",
+      customerId: null,
+      employeeId: null,
+      csrfToken: "mock-csrf",
     };
 
     employeeSession = {
@@ -73,6 +76,9 @@ describe("Billora — AI Business Assistant & Gemini Production Verification", (
       email: empUser.email,
       fullName: empUser.fullName,
       role: "EMPLOYEE",
+      customerId: null,
+      employeeId: null,
+      csrfToken: "mock-csrf",
     };
 
     customerSession = {
@@ -81,6 +87,9 @@ describe("Billora — AI Business Assistant & Gemini Production Verification", (
       email: custUser.email,
       fullName: custUser.fullName,
       role: "CUSTOMER",
+      customerId: custUser.id,
+      employeeId: null,
+      csrfToken: "mock-csrf",
     };
   });
 

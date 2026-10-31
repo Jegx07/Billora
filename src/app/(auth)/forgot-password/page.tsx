@@ -2,6 +2,7 @@
 
 import { FormField } from "@/components/ui/Primitives";
 import Link from "next/link";
+import { BilloraLogo } from "@/components/brand/Logo";
 import React, { useState } from "react";
 
 export default function ForgotPasswordPage() {
@@ -32,6 +33,11 @@ export default function ForgotPasswordPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-bg-canvas p-6">
       <div className="w-full max-w-md rounded-lg border border-border bg-bg-base p-6 sm:p-8 shadow-sm">
+        <div className="mb-5 flex justify-center sm:justify-start">
+          <Link href="/login" className="hover:opacity-90 transition-opacity">
+            <BilloraLogo variant="auto" size="md" />
+          </Link>
+        </div>
         <div className="text-xs font-mono uppercase tracking-wider text-brand font-semibold">
           Account Recovery
         </div>

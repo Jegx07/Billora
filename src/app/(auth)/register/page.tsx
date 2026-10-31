@@ -3,6 +3,7 @@
 import { FormField, useToast } from "@/components/ui/Primitives";
 import { Check, ShieldCheck, X } from "lucide-react";
 import Link from "next/link";
+import { BilloraLogo } from "@/components/brand/Logo";
 import { useRouter } from "next/navigation";
 import React, { useState } from "react";
 
@@ -66,13 +67,16 @@ export default function RegisterPage() {
     <div className="min-h-screen flex items-center justify-center bg-bg-canvas p-6">
       <div className="w-full max-w-md rounded-lg border border-border bg-bg-base p-6 sm:p-8 shadow-sm">
         <div className="mb-6">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-mono uppercase tracking-wider text-brand font-semibold">
-              Customer Self-Service Registration
-            </span>
+          <div className="mb-4 flex items-center justify-between">
+            <Link href="/login" className="hover:opacity-90 transition-opacity">
+              <BilloraLogo variant="auto" size="md" />
+            </Link>
             <span className="rounded bg-bg-subtle px-2 py-0.5 font-mono text-[10px] text-text-secondary border border-border">
               ROLE: CUSTOMER
             </span>
+          </div>
+          <div className="text-xs font-mono uppercase tracking-wider text-brand font-semibold">
+            Customer Self-Service Registration
           </div>
           <h1 className="mt-1.5 text-xl font-semibold text-text-primary">
             Create your Billora account

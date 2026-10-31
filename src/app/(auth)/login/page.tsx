@@ -3,6 +3,7 @@
 import { FormField, useToast } from "@/components/ui/Primitives";
 import { ArrowRight, CheckCircle2, Lock, Mail, ShieldCheck } from "lucide-react";
 import Link from "next/link";
+import { BilloraLogo } from "@/components/brand/Logo";
 import { useRouter } from "next/navigation";
 import React, { useState } from "react";
 
@@ -69,15 +70,10 @@ export default function LoginPage() {
       <div className="hidden lg:flex lg:col-span-5 flex-col justify-between bg-bg-sidebar text-white p-10 border-r border-white/10">
         <div>
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand font-mono font-bold text-base text-white">
-              B
-            </div>
-            <div>
-              <span className="text-lg font-bold tracking-tight">Billora</span>
-              <span className="ml-2 rounded bg-white/10 px-2 py-0.5 font-mono text-[10px] text-slate-300">
-                v1.0 ENTERPRISE
-              </span>
-            </div>
+            <BilloraLogo variant="dark" size="lg" priority />
+            <span className="rounded bg-white/10 px-2 py-0.5 font-mono text-[10px] text-slate-300">
+              v1.0 ENTERPRISE
+            </span>
           </div>
 
           <h1 className="mt-12 text-3xl font-semibold tracking-tight leading-tight">
@@ -134,6 +130,9 @@ export default function LoginPage() {
         <div className="w-full max-w-md">
           <div className="rounded-lg border border-border bg-bg-base p-6 sm:p-8 shadow-sm">
             <div className="mb-6">
+              <div className="lg:hidden mb-4 flex justify-center">
+                <BilloraLogo variant="auto" size="md" />
+              </div>
               <div className="text-xs font-mono uppercase tracking-wider text-brand font-semibold">
                 Authentication
               </div>

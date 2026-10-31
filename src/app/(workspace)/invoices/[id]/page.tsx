@@ -19,6 +19,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import Link from "next/link";
+import { BilloraLogo } from "@/components/brand/Logo";
 import { useParams } from "next/navigation";
 import React, { useCallback, useEffect, useState } from "react";
 
@@ -251,10 +252,7 @@ export default function InvoiceDetailPage() {
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4 border-b border-border pb-6">
           <div>
             <div className="flex items-center gap-2.5">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand font-mono font-bold text-white">
-                B
-              </div>
-              <span className="text-lg font-bold tracking-tight">Billora</span>
+              <BilloraLogo variant="light" size="md" />
             </div>
             <p className="mt-1 text-xs text-text-muted">
               Unified Subscription, Billing & Revenue Intelligence Platform

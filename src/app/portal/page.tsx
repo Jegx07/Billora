@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { BilloraLogo, BilloraIcon } from "@/components/brand/Logo";
 import {
   AlertCircle,
   ArrowUpDown,
@@ -436,18 +437,11 @@ export default function CustomerPortalPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
           {/* Logo & Brand */}
           <div className="flex items-center gap-3">
-            <Link href="/portal" className="flex items-center gap-2.5">
-              <div className="h-9 w-9 rounded-lg bg-brand flex items-center justify-center text-white font-bold text-sm shadow-xs">
-                B
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-base tracking-tight text-text-primary">
-                  Billora
-                </span>
-                <span className="font-mono text-[10px] uppercase tracking-wider rounded-full bg-brand-subtle text-brand border border-brand/20 px-2 py-0.5 font-semibold">
-                  Customer Portal
-                </span>
-              </div>
+            <Link href="/portal" className="flex items-center gap-3">
+              <BilloraLogo variant="auto" size="md" />
+              <span className="font-mono text-[10px] uppercase tracking-wider rounded-full bg-brand-subtle text-brand border border-brand/20 px-2 py-0.5 font-semibold">
+                Customer Portal
+              </span>
             </Link>
           </div>
 

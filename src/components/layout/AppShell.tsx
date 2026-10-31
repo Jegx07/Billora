@@ -2,6 +2,7 @@
 
 import { useToast } from "@/components/ui/Primitives";
 import { cn } from "@/lib/utils";
+import { BilloraBrandLink, BilloraIcon, BilloraLogo } from "@/components/brand/Logo";
 import {
   BadgePercent,
   Bell,
@@ -327,9 +328,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   if (loadingAuth || !user || user.role === "CUSTOMER") {
     return (
       <div className="min-h-screen flex items-center justify-center bg-bg-canvas">
-        <div className="flex flex-col items-center gap-3">
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand border-t-transparent" />
-          <span className="font-mono text-xs text-text-muted">Authenticating workspace session...</span>
+        <div className="flex flex-col items-center gap-4">
+          <BilloraLogo variant="auto" size="md" className="animate-pulse" />
+          <div className="flex items-center gap-2">
+            <div className="h-4 w-4 animate-spin rounded-full border-2 border-brand border-t-transparent" />
+            <span className="font-mono text-xs text-text-muted">Authenticating workspace session...</span>
+          </div>
         </div>
       </div>
     );
@@ -358,22 +362,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         )}
       >
         {/* Brand Header */}
-        <div className="flex h-14 items-center justify-between px-4 border-b border-white/10">
-          <Link href="/dashboard" className="flex items-center gap-2.5 overflow-hidden">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand text-white font-mono font-bold text-sm shadow-sm">
-              B
-            </div>
-            {!collapsed && (
-              <div className="min-w-0">
-                <div className="text-sm font-bold tracking-tight text-white leading-none">
-                  Billora
-                </div>
-                <div className="text-[10px] font-mono text-slate-400 truncate mt-0.5">
-                  REVENUE INTELLIGENCE
-                </div>
-              </div>
-            )}
-          </Link>
+        <div className="flex h-14 items-center justify-between px-3.5 border-b border-white/10">
+          <BilloraBrandLink
+            href="/dashboard"
+            collapsed={collapsed}
+            variant="dark"
+            className="overflow-hidden"
+          />
           <button
             type="button"
             onClick={() => setCollapsed((c) => !c)}
@@ -465,6 +460,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             >
               <Menu className="h-5 w-5" />
             </button>
+            <Link href="/dashboard" className="lg:hidden flex items-center mr-2">
+              <BilloraLogo variant="auto" size="xs" />
+            </Link>
+            {collapsed && (
+              <Link href="/dashboard" className="hidden lg:flex items-center mr-2">
+                <BilloraLogo variant="auto" size="xs" />
+              </Link>
+            )}
 
             {/* Cmd+K Search Trigger */}
             <button
@@ -550,7 +553,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           />
           <div className="relative z-10 w-64 bg-bg-sidebar text-slate-200 flex flex-col h-full p-4">
             <div className="flex items-center justify-between pb-4 border-b border-white/10">
-              <span className="text-base font-bold text-white">Billora</span>
+              <Link href="/dashboard" onClick={() => setMobileMenuOpen(false)}>
+                <BilloraLogo variant="dark" size="sm" />
+              </Link>
               <button
                 type="button"
                 onClick={() => setMobileMenuOpen(false)}
