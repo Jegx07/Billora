@@ -21,6 +21,27 @@ import {
 } from "@/server/validators/schemas";
 import { z } from "zod";
 
+const DEFAULT_DEMO_USERS: Record<
+  string,
+  { role: UserRole; fullName: string; defaultPassword: string }
+> = {
+  "admin@billora.io": {
+    role: "ADMIN",
+    fullName: "Vikramaditya Rao (Admin)",
+    defaultPassword: "Admin@Billora2026!",
+  },
+  "arjun.mehta@billora.io": {
+    role: "EMPLOYEE",
+    fullName: "Arjun Mehta",
+    defaultPassword: "Emp@Billora2026!",
+  },
+  "priya.sharma@acmeindia.in": {
+    role: "CUSTOMER",
+    fullName: "Priya Sharma",
+    defaultPassword: "Cust@Billora2026!",
+  },
+};
+
 export class AuthService {
   static async ensureRoles() {
     const roles: { name: UserRole; description: string }[] = [
@@ -81,26 +102,26 @@ export class AuthService {
 
       const customer = existingCustomer
         ? await tx.customer.update({
-            where: { id: existingCustomer.id },
-            data: {
-              userId: user.id,
-              contactName: input.fullName,
-              companyName: input.companyName ?? existingCustomer.companyName,
-              phone: input.phone ?? existingCustomer.phone,
-              gstin: input.gstin ?? existingCustomer.gstin,
-            },
-          })
+          where: { id: existingCustomer.id },
+          data: {
+            userId: user.id,
+            contactName: input.fullName,
+            companyName: input.companyName ?? existingCustomer.companyName,
+            phone: input.phone ?? existingCustomer.phone,
+            gstin: input.gstin ?? existingCustomer.gstin,
+          },
+        })
         : await tx.customer.create({
-            data: {
-              customerCode,
-              userId: user.id,
-              contactName: input.fullName,
-              companyName: input.companyName ?? null,
-              email: input.email,
-              phone: input.phone ?? null,
-              gstin: input.gstin ?? null,
-            },
-          });
+          data: {
+            customerCode,
+            userId: user.id,
+            contactName: input.fullName,
+            companyName: input.companyName ?? null,
+            email: input.email,
+            phone: input.phone ?? null,
+            gstin: input.gstin ?? null,
+          },
+        });
 
       const rawSessionToken = generateRandomToken(32);
       const csrfToken = generateRandomToken(16);
@@ -150,7 +171,7 @@ export class AuthService {
   static async login(rawInput: z.infer<typeof loginSchema>, ipAddress?: string, userAgent?: string) {
     const input = loginSchema.parse(rawInput);
 
-    const user = await prisma.user.findUnique({
+    let user = await prisma.user.findUnique({
       where: { email: input.email },
       include: {
         role: true,
@@ -158,6 +179,60 @@ export class AuthService {
         employee: true,
       },
     });
+
+    // Auto-provision standard demo accounts on first login if the database has not been seeded yet
+    if (!user && DEFAULT_DEMO_USERS[input.email]) {
+      const spec = DEFAULT_DEMO_USERS[input.email];
+      await this.ensureRoles();
+      const roleRec = await prisma.role.findUniqueOrThrow({ where: { name: spec.role } });
+      user = await prisma.user.create({
+        data: {
+          email: input.email,
+          fullName: spec.fullName,
+          passwordHash: hashPassword(spec.defaultPassword),
+          roleId: roleRec.id,
+          status: "ACTIVE",
+          emailVerifiedAt: new Date(),
+        },
+        include: {
+          role: true,
+          customer: true,
+          employee: true,
+        },
+      });
+
+      if (spec.role === "EMPLOYEE" && !user.employee) {
+        const empCount = await prisma.employee.count();
+        const emp = await prisma.employee.create({
+          data: {
+            employeeCode: `EMP-${String(empCount + 101).padStart(3, "0")}`,
+            userId: user.id,
+            department: "Revenue Operations",
+            designation: "Senior Billing Specialist",
+            phone: "+91 98201 11200",
+          },
+        });
+        user = { ...user, employee: emp };
+      } else if (spec.role === "CUSTOMER" && !user.customer) {
+        const custCount = await prisma.customer.count();
+        const cust = await prisma.customer.create({
+          data: {
+            customerCode: `CUST-${String(custCount + 1001).padStart(4, "0")}`,
+            userId: user.id,
+            contactName: user.fullName,
+            companyName: "Acme Cloud Technologies Pvt Ltd",
+            email: user.email,
+            phone: "+91 98110 10001",
+            gstin: "29AAACB1001F1Z5",
+            city: "Bengaluru",
+            state: "Karnataka",
+            country: "India",
+            postalCode: "560001",
+          },
+        });
+        user = { ...user, customer: cust };
+      }
+    }
 
     if (!user || !verifyPassword(input.password, user.passwordHash)) {
       throw new AppError("UNAUTHORIZED", "Invalid email address or password", 401);

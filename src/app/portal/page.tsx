@@ -26,28 +26,18 @@ import {
   Repeat,
   Search,
   Shield,
-<<<<<<< HEAD
-  ArrowUpRight,
-} from 'lucide-react';
-=======
   Sparkles,
   Sun,
   UserCheck,
   XCircle,
   Zap,
 } from "lucide-react";
->>>>>>> fef57322168804fa18e83ff7e40bec04e453ed41
 import {
   Button,
   Card,
   CardBody,
   CardHeader,
   EmptyState,
-<<<<<<< HEAD
-  useToast,
-} from '@/components/ui/Primitives';
-import { formatINR, formatDate } from '@/lib/utils';
-=======
   FormField,
   ModalDialog,
   MoneyDisplay,
@@ -59,7 +49,6 @@ import { formatINR, formatDate } from '@/lib/utils';
   useToast,
 } from "@/components/ui/Primitives";
 import { formatDate, formatINR } from "@/lib/utils";
->>>>>>> fef57322168804fa18e83ff7e40bec04e453ed41
 
 type TabKey =
   | "OVERVIEW"
@@ -73,21 +62,14 @@ type TabKey =
 export default function CustomerPortalPage() {
   const router = useRouter();
   const { toast } = useToast();
-<<<<<<< HEAD
-  const [activeTab, setActiveTab] = useState<TabKey>('OVERVIEW');
-=======
 
   const [activeTab, setActiveTab] = useState<TabKey>("OVERVIEW");
->>>>>>> fef57322168804fa18e83ff7e40bec04e453ed41
   const [data, setData] = useState<any>(null);
   const [plans, setPlans] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [taxes, setTaxes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-<<<<<<< HEAD
-  const [switchingRole, setSwitchingRole] = useState<string | null>(null);
-=======
   const [darkMode, setDarkMode] = useState(false);
 
   // Sorting & Filtering State for Subscriptions
@@ -104,7 +86,6 @@ export default function CustomerPortalPage() {
   const [paySearch, setPaySearch] = useState("");
   const [payMethodFilter, setPayMethodFilter] = useState("ALL");
   const [paySortBy, setPaySortBy] = useState<"NEWEST" | "AMOUNT_DESC">("NEWEST");
->>>>>>> fef57322168804fa18e83ff7e40bec04e453ed41
 
   // Checkout Modal State
   const [payModalInvoice, setPayModalInvoice] = useState<any | null>(null);
@@ -138,31 +119,6 @@ export default function CustomerPortalPage() {
   async function loadPortal() {
     setLoading(true);
     try {
-<<<<<<< HEAD
-      let overviewRes = await fetch('/api/portal/overview', { cache: 'no-store' });
-      let overviewJson = await overviewRes.json();
-
-      // Auto-switch to CUSTOMER demo session if user navigated directly to /portal without a customer session
-      if (!overviewJson.success && !overviewJson.ok) {
-        const switchRes = await fetch('/api/auth/demo-switch', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          cache: 'no-store',
-          body: JSON.stringify({ role: 'CUSTOMER' }),
-        });
-        const switchJson = await switchRes.json();
-        if (switchJson.success) {
-          overviewRes = await fetch('/api/portal/overview', { cache: 'no-store' });
-          overviewJson = await overviewRes.json();
-        }
-      }
-
-      const [plansRes, prodRes, taxRes] = await Promise.all([
-        fetch('/api/plans', { cache: 'no-store' }),
-        fetch('/api/products', { cache: 'no-store' }),
-        fetch('/api/taxes', { cache: 'no-store' }),
-      ]);
-=======
       const [overviewRes, plansRes, prodRes, taxRes] = await Promise.all([
         fetch("/api/portal/overview"),
         fetch("/api/plans"),
@@ -170,8 +126,16 @@ export default function CustomerPortalPage() {
         fetch("/api/taxes"),
       ]);
 
+      if (overviewRes.status === 401) {
+        router.replace("/login");
+        return;
+      }
+      if (overviewRes.status === 403) {
+        router.replace("/dashboard");
+        return;
+      }
+
       const overviewJson = await overviewRes.json();
->>>>>>> fef57322168804fa18e83ff7e40bec04e453ed41
       const plansJson = await plansRes.json();
       const prodJson = await prodRes.json();
       const taxJson = await taxRes.json();
@@ -181,21 +145,6 @@ export default function CustomerPortalPage() {
       }
       if (plansJson.success || plansJson.ok) {
         setPlans(plansJson.data || []);
-<<<<<<< HEAD
-      } else if (overviewJson.data?.availablePlans) {
-        setPlans(overviewJson.data.availablePlans);
-      }
-      if (prodJson.success || prodJson.ok) {
-        const prodList = prodJson.data || [];
-        setProducts(prodList);
-        if (prodList[0]) setSelectedProductId(prodList[0].id);
-      }
-      if (taxJson.success || taxJson.ok) {
-        const taxList = taxJson.data || [];
-        setTaxes(taxList);
-        if (taxList[0]) setSelectedTaxId(taxList[0].id);
-=======
->>>>>>> fef57322168804fa18e83ff7e40bec04e453ed41
       }
       if (prodJson.success || prodJson.ok) {
         const prodList = prodJson.data || [];
@@ -211,7 +160,7 @@ export default function CustomerPortalPage() {
       toast({
         title: "Network error loading portal",
         description: err.message,
-        variant: "danger",
+        variant: "error",
       });
     } finally {
       setLoading(false);
@@ -231,31 +180,18 @@ export default function CustomerPortalPage() {
         body: JSON.stringify({ action }),
       });
       const json = await res.json();
-<<<<<<< HEAD
-      if (json.success || res.ok) {
-        toast({
-          title: `Subscription ${action.toLowerCase()}d`,
-          variant: 'success',
-=======
       if (res.ok && (json.success || json.ok)) {
         toast({
           title: `Subscription ${action === "CANCEL" ? "Cancelled" : action === "PAUSE" ? "Paused" : "Resumed"}`,
           description: `Action '${action}' applied successfully to contract.`,
           variant: "success",
->>>>>>> fef57322168804fa18e83ff7e40bec04e453ed41
         });
         await loadPortal();
       } else {
         toast({
-<<<<<<< HEAD
-          title: 'Action not allowed',
-          description: json.error?.message || 'Could not update subscription',
-          variant: 'error',
-=======
           title: "Action Failed",
           description: json.error?.message || "Could not transition subscription state.",
-          variant: "danger",
->>>>>>> fef57322168804fa18e83ff7e40bec04e453ed41
+          variant: "error",
         });
       }
     } finally {
@@ -275,24 +211,14 @@ export default function CustomerPortalPage() {
         }),
       });
       const json = await res.json();
-<<<<<<< HEAD
-      if (json.success || json.ok) {
-=======
       if (res.ok && (json.success || json.ok)) {
->>>>>>> fef57322168804fa18e83ff7e40bec04e453ed41
         setRazorpayOrder(json.data);
         setPayModalInvoice(invoice);
       } else {
         toast({
-<<<<<<< HEAD
-          title: 'Unable to initiate payment',
-          description: json.error?.message || 'Error creating Razorpay order',
-          variant: 'error',
-=======
           title: "Payment Order Failed",
           description: json.error?.message || "Unable to initialize Razorpay checkout order.",
-          variant: "danger",
->>>>>>> fef57322168804fa18e83ff7e40bec04e453ed41
+          variant: "error",
         });
       }
     } finally {
@@ -304,29 +230,6 @@ export default function CustomerPortalPage() {
     if (!razorpayOrder) return;
     setBusy(true);
     try {
-<<<<<<< HEAD
-      const orderId = razorpayOrder.orderId || razorpayOrder.razorpayOrderId;
-      const samplePayId =
-        razorpayOrder.testSignaturePreview?.sampleRazorpayPaymentId || `pay_${Date.now()}`;
-      const sampleSig = razorpayOrder.testSignaturePreview?.sampleSignature || '';
-
-      const res = await fetch('/api/payments/razorpay/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          paymentId: razorpayOrder.paymentId,
-          razorpayOrderId: orderId,
-          razorpayPaymentId: samplePayId,
-          razorpaySignature: sampleSig,
-        }),
-      });
-      const json = await res.json();
-      if (json.success || res.ok) {
-        toast({
-          title: 'Payment Verified',
-          description: `Invoice ${payModalInvoice?.invoiceNumber || ''} settled via Razorpay.`,
-          variant: 'success',
-=======
       const res = await fetch("/api/payments/razorpay/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -344,22 +247,15 @@ export default function CustomerPortalPage() {
           title: "Payment Verified",
           description: "Razorpay payment signature verified and invoice marked as PAID.",
           variant: "success",
->>>>>>> fef57322168804fa18e83ff7e40bec04e453ed41
         });
         setPayModalInvoice(null);
         setRazorpayOrder(null);
         await loadPortal();
       } else {
         toast({
-<<<<<<< HEAD
-          title: 'Payment verification failed',
-          description: json.error?.message || 'Signature verification error',
-          variant: 'error',
-=======
           title: "Verification Failed",
           description: json.error?.message || "Payment verification failed.",
-          variant: "danger",
->>>>>>> fef57322168804fa18e83ff7e40bec04e453ed41
+          variant: "error",
         });
       }
     } finally {
@@ -384,26 +280,13 @@ export default function CustomerPortalPage() {
           lines: [
             {
               productId: selectedProductId,
-<<<<<<< HEAD
-              quantity: Math.max(1, Number(subscribeModalPlan.minQuantity || 1)),
-=======
               quantity: 1,
->>>>>>> fef57322168804fa18e83ff7e40bec04e453ed41
               taxRuleId: selectedTaxId || undefined,
             },
           ],
         }),
       });
       const json = await res.json();
-<<<<<<< HEAD
-      if (json.success || json.ok) {
-        // Trigger billing run so customer immediately sees their initial invoice
-        await fetch('/api/billing/run', { method: 'POST', body: JSON.stringify({}) });
-        toast({
-          title: 'Subscription Activated!',
-          description: `Subscribed to ${subscribeModalPlan.name}.`,
-          variant: 'success',
-=======
       if (res.ok && (json.success || json.ok)) {
         // Trigger billing run so customer immediately sees their initial invoice
         await fetch("/api/billing/run", { method: "POST" });
@@ -411,84 +294,20 @@ export default function CustomerPortalPage() {
           title: "Subscription Activated",
           description: `Successfully enrolled in ${subscribeModalPlan.name}.`,
           variant: "success",
->>>>>>> fef57322168804fa18e83ff7e40bec04e453ed41
         });
         setSubscribeModalPlan(null);
         setDiscountCode("");
         await loadPortal();
-<<<<<<< HEAD
-        setActiveTab('SUBSCRIPTIONS');
-      } else {
-        toast({
-          title: 'Subscription failed',
-          description: json.error?.message || 'Could not create subscription',
-          variant: 'error',
-=======
         setActiveTab("SUBSCRIPTIONS");
       } else {
         toast({
           title: "Enrollment Failed",
           description: json.error?.message || "Could not complete plan subscription.",
-          variant: "danger",
->>>>>>> fef57322168804fa18e83ff7e40bec04e453ed41
+          variant: "error",
         });
       }
     } finally {
       setBusy(false);
-    }
-  }
-
-<<<<<<< HEAD
-  async function switchDemoRole(role: 'ADMIN' | 'EMPLOYEE' | 'CUSTOMER') {
-    if (switchingRole) return;
-    setSwitchingRole(role);
-    try {
-      const res = await fetch('/api/auth/demo-switch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        cache: 'no-store',
-        body: JSON.stringify({ role }),
-      });
-      const json = await res.json();
-      if (json.success) {
-        toast({
-          title: `Switched to ${role} View`,
-          description: `Signed in as ${json.data.user.fullName} (${json.data.user.email})`,
-          variant: 'info',
-        });
-        if (role === 'CUSTOMER') {
-          await loadPortal();
-        } else {
-          router.push('/dashboard');
-          router.refresh();
-        }
-      } else {
-        toast({
-          title: 'Role switch failed',
-          description: json.error?.message || 'Unable to switch role',
-          variant: 'error',
-        });
-      }
-    } catch {
-      toast({
-        title: 'Role switch failed',
-        description: 'Network error while switching role',
-        variant: 'error',
-      });
-    } finally {
-      setSwitchingRole(null);
-=======
-  async function switchDemoRole(role: "ADMIN" | "EMPLOYEE" | "CUSTOMER") {
-    await fetch("/api/auth/demo-switch", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ role }),
-    });
-    if (role === "CUSTOMER") {
-      await loadPortal();
-    } else {
-      router.push("/dashboard");
->>>>>>> fef57322168804fa18e83ff7e40bec04e453ed41
     }
   }
 
@@ -498,18 +317,10 @@ export default function CustomerPortalPage() {
   const rawPayments: any[] = data?.payments || [];
   const notifications: any[] = data?.notifications || [];
 
-<<<<<<< HEAD
-  const activeSubs = subscriptions.filter((s: any) => s.status === 'ACTIVE');
-  const openInvoices = invoices.filter(
-    (i: any) =>
-      ['CONFIRMED', 'PARTIALLY_PAID', 'OVERDUE'].includes(i.status) &&
-      Number(i.outstandingAmount ?? i.amountDue ?? 0) > 0
-=======
   const activeSubs = rawSubscriptions.filter((s: any) => s.status === "ACTIVE");
   const openInvoices = rawInvoices.filter((i: any) =>
     ["CONFIRMED", "PARTIALLY_PAID", "OVERDUE"].includes(i.status) &&
     Number(i.outstandingAmount ?? i.amountDue ?? 0) > 0
->>>>>>> fef57322168804fa18e83ff7e40bec04e453ed41
   );
 
   const totalOutstanding = openInvoices.reduce(
@@ -619,21 +430,6 @@ export default function CustomerPortalPage() {
   ];
 
   return (
-<<<<<<< HEAD
-    <div className="min-h-screen bg-[#090A0F] text-[#F3F4F6]">
-      {/* Top Customer Portal Bar */}
-      <header className="sticky top-0 z-30 border-b border-white/[0.07] bg-[#090A0F]/90 backdrop-blur-md">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-3">
-            <Link href="/portal" className="flex items-center gap-2.5">
-              <div className="h-8 w-8 rounded-lg bg-[#10B981]/15 border border-[#10B981]/40 flex items-center justify-center text-[#10B981] font-bold">
-                B
-              </div>
-              <div>
-                <span className="font-semibold text-sm tracking-tight text-white">Billora</span>
-                <span className="hidden sm:inline-block ml-2 text-[11px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-white/[0.06] text-[#9CA3AF]">
-                  Self-Service Portal
-=======
     <div className="min-h-screen bg-bg-canvas text-text-primary flex flex-col font-sans transition-colors duration-150">
       {/* Top Customer Portal Navigation Bar (Matching Admin & Employee Shell) */}
       <header className="sticky top-0 z-30 border-b border-border bg-bg-base/90 backdrop-blur-md">
@@ -650,198 +446,101 @@ export default function CustomerPortalPage() {
                 </span>
                 <span className="font-mono text-[10px] uppercase tracking-wider rounded-full bg-brand-subtle text-brand border border-brand/20 px-2 py-0.5 font-semibold">
                   Customer Portal
->>>>>>> fef57322168804fa18e83ff7e40bec04e453ed41
                 </span>
               </div>
             </Link>
           </div>
 
-<<<<<<< HEAD
-          <div className="flex items-center gap-2 sm:gap-3">
-            <div
-              role="group"
-              aria-label="Role switcher"
-              className="flex items-center gap-1 bg-[#11131A] border border-white/[0.08] rounded-md p-1 text-[11px] font-mono"
-            >
-              <Shield className="hidden sm:inline w-3.5 h-3.5 text-[#10B981] ml-1.5 mr-0.5" />
-              <span className="hidden lg:inline text-[#9CA3AF] mr-1">Experience:</span>
-              <button
-                type="button"
-                disabled={switchingRole !== null}
-                onClick={() => switchDemoRole('ADMIN')}
-                className="px-2 py-1 rounded hover:bg-white/[0.08] text-[#D1D5DB] hover:text-white transition-colors disabled:opacity-60"
-=======
           {/* Right Controls: Role Switcher + Theme Toggle + User Info + Sign Out */}
           <div className="flex items-center gap-2.5">
-            {/* Demo Role Switcher */}
-            <div className="hidden md:flex items-center gap-1 rounded-lg border border-border bg-bg-subtle p-1 text-xs">
-              <Shield className="w-3.5 h-3.5 text-brand ml-1 mr-0.5" />
-              <button
-                type="button"
-                onClick={() => switchDemoRole("ADMIN")}
-                className="rounded px-2 py-1 text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-bg-base transition-colors"
->>>>>>> fef57322168804fa18e83ff7e40bec04e453ed41
-              >
-                Admin
-              </button>
-              <button
-                type="button"
-<<<<<<< HEAD
-                disabled={switchingRole !== null}
-                onClick={() => switchDemoRole('EMPLOYEE')}
-                className="px-2 py-1 rounded hover:bg-white/[0.08] text-[#D1D5DB] hover:text-white transition-colors disabled:opacity-60"
-=======
-                onClick={() => switchDemoRole("EMPLOYEE")}
-                className="rounded px-2 py-1 text-xs font-medium text-text-secondary hover:text-text-primary hover:bg-bg-base transition-colors"
->>>>>>> fef57322168804fa18e83ff7e40bec04e453ed41
-              >
-                Employee
-              </button>
-              <button
-                type="button"
-<<<<<<< HEAD
-                disabled={switchingRole !== null}
-                onClick={() => switchDemoRole('CUSTOMER')}
-                className="px-2 py-1 rounded bg-[#10B981] text-[#090A0F] font-semibold transition-colors disabled:opacity-60"
-              >
-                <span className="hidden sm:inline">Customer Portal</span>
-                <span className="sm:hidden">Customer</span>
-=======
-                onClick={() => switchDemoRole("CUSTOMER")}
-                className="rounded px-2 py-1 text-xs font-semibold bg-bg-base text-brand shadow-xs"
-              >
-                Customer
->>>>>>> fef57322168804fa18e83ff7e40bec04e453ed41
-              </button>
-            </div>
-
-            {/* Theme Toggle */}
-            <button
-              type="button"
-              onClick={toggleDarkMode}
-              aria-label="Toggle theme"
-              className="inline-flex items-center justify-center h-8 w-8 rounded-lg border border-border bg-bg-base text-text-secondary hover:bg-bg-subtle hover:text-text-primary transition-colors"
-            >
-              {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-            </button>
-
-            {/* Customer User Chip */}
-            {customer && (
-<<<<<<< HEAD
-              <div className="text-right hidden md:block">
-                <div className="text-xs font-medium text-white">
-                  {customer.companyName || customer.contactName || customer.user?.name}
-                </div>
-                <div className="text-[11px] text-[#6B7280] font-mono">
-                  {customer.email || customer.user?.email}
-=======
-              <div className="hidden sm:flex items-center gap-2.5 pl-2 border-l border-border">
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-brand/10 text-brand font-semibold text-xs border border-brand/20">
-                  {(customer.contactName || customer.companyName || "C").slice(0, 2).toUpperCase()}
-                </div>
-                <div className="text-left">
-                  <div className="text-xs font-semibold text-text-primary leading-tight truncate max-w-[140px]">
-                    {customer.companyName || customer.contactName}
-                  </div>
-                  <div className="font-mono text-[10px] text-text-muted truncate max-w-[140px]">
-                    {customer.email}
-                  </div>
->>>>>>> fef57322168804fa18e83ff7e40bec04e453ed41
-                </div>
+              {/* Verified Customer Portal Badge */}
+              <div className="hidden md:flex items-center gap-1.5 rounded-lg border border-border bg-bg-subtle px-2.5 py-1 text-xs">
+                <Shield className="w-3.5 h-3.5 text-brand" />
+                <span className="text-text-muted">Portal:</span>
+                <span className="font-mono font-semibold text-[11px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30">
+                  CUSTOMER
+                </span>
               </div>
-            )}
 
-            {/* Sign Out Button */}
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={async () => {
-                await fetch("/api/auth/logout", { method: "POST" });
-                router.push("/login");
-              }}
-              className="ml-1"
-            >
-              <LogOut className="w-3.5 h-3.5 sm:mr-1.5" />
-              <span className="hidden sm:inline">Sign Out</span>
-            </Button>
-          </div>
-        </div>
-
-<<<<<<< HEAD
-        {/* Navigation Tabs */}
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 flex items-center gap-1 overflow-x-auto border-t border-white/[0.04]">
-          {[
-            { key: 'OVERVIEW', label: 'Overview', icon: Layers },
-            { key: 'SUBSCRIPTIONS', label: `My Subscriptions (${subscriptions.length})`, icon: Sparkles },
-            { key: 'PLANS', label: 'Available Plans', icon: ArrowUpRight },
-            { key: 'INVOICES', label: `My Invoices (${invoices.length})`, icon: FileText },
-            { key: 'PAYMENTS', label: `Payment History (${payments.length})`, icon: CreditCard },
-            { key: 'NOTIFICATIONS', label: `Notifications (${notifications.length})`, icon: Bell },
-            { key: 'ACCOUNT', label: 'Account Settings', icon: UserCheck },
-          ].map((tab) => {
-            const Icon = tab.icon;
-            const active = activeTab === tab.key;
-            return (
+              {/* Theme Toggle */}
               <button
-                key={tab.key}
                 type="button"
-                onClick={() => setActiveTab(tab.key as TabKey)}
-                className={`flex items-center gap-2 px-4 py-3 text-xs font-medium border-b-2 transition-colors whitespace-nowrap ${
-                  active
-                    ? 'border-[#10B981] text-[#10B981] bg-[#10B981]/[0.04]'
-                    : 'border-transparent text-[#9CA3AF] hover:text-white'
-                }`}
+                onClick={toggleDarkMode}
+                aria-label="Toggle theme"
+                className="inline-flex items-center justify-center h-8 w-8 rounded-lg border border-border bg-bg-base text-text-secondary hover:bg-bg-subtle hover:text-text-primary transition-colors"
               >
-                <Icon className="w-3.5 h-3.5" />
-                {tab.label}
+                {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
               </button>
-            );
-          })}
-        </div>
-      </header>
 
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-6">
-=======
-        {/* 7 Clean Navigation Tabs */}
-        <div className="border-t border-border bg-bg-base">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center gap-1 overflow-x-auto">
-            {navTabs.map((tab) => {
-              const Icon = tab.icon;
-              const active = activeTab === tab.key;
-              return (
-                <button
-                  key={tab.key}
-                  onClick={() => setActiveTab(tab.key as TabKey)}
-                  className={`flex items-center gap-2 px-4 py-3 text-xs font-medium border-b-2 transition-all whitespace-nowrap ${
-                    active
-                      ? "border-brand text-brand bg-brand-subtle/50 font-semibold"
-                      : "border-transparent text-text-muted hover:text-text-primary hover:bg-bg-subtle/60"
-                  }`}
-                >
-                  <Icon className="w-4 h-4" />
-                  <span>{tab.label}</span>
-                  {tab.badge !== undefined && tab.badge > 0 && (
-                    <span
-                      className={`font-mono text-[10px] px-1.5 py-0.2 rounded-full font-semibold ${
-                        active
-                          ? "bg-brand text-white"
-                          : "bg-bg-subtle text-text-muted border border-border"
-                      }`}
-                    >
-                      {tab.badge}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
+              {/* Customer User Chip */}
+              {customer && (
+                <div className="hidden sm:flex items-center gap-2.5 pl-2 border-l border-border">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-brand/10 text-brand font-semibold text-xs border border-brand/20">
+                    {(customer.contactName || customer.companyName || "C").slice(0, 2).toUpperCase()}
+                  </div>
+                  <div className="text-left">
+                    <div className="text-xs font-semibold text-text-primary leading-tight truncate max-w-[140px]">
+                      {customer.companyName || customer.contactName}
+                    </div>
+                    <div className="font-mono text-[10px] text-text-muted truncate max-w-[140px]">
+                      {customer.email}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Sign Out Button */}
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={async () => {
+                  await fetch("/api/auth/logout", { method: "POST" });
+                  router.push("/login");
+                }}
+                className="ml-1"
+              >
+                <LogOut className="w-3.5 h-3.5 mr-1.5" />
+                Sign Out
+              </Button>
+            </div>
           </div>
-        </div>
+
+          {/* 7 Clean Navigation Tabs */}
+          <div className="border-t border-border bg-bg-base">
+            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center gap-1 overflow-x-auto">
+              {navTabs.map((tab) => {
+                const Icon = tab.icon;
+                const active = activeTab === tab.key;
+                return (
+                  <button
+                    key={tab.key}
+                    onClick={() => setActiveTab(tab.key as TabKey)}
+                    className={`flex items-center gap-2 px-4 py-3 text-xs font-medium border-b-2 transition-all whitespace-nowrap ${active
+                        ? "border-brand text-brand bg-brand-subtle/50 font-semibold"
+                        : "border-transparent text-text-muted hover:text-text-primary hover:bg-bg-subtle/60"
+                      }`}
+                  >
+                    <Icon className="w-4 h-4" />
+                    <span>{tab.label}</span>
+                    {tab.badge !== undefined && tab.badge > 0 && (
+                      <span
+                        className={`font-mono text-[10px] px-1.5 py-0.2 rounded-full font-semibold ${active
+                            ? "bg-brand text-white"
+                            : "bg-bg-subtle text-text-muted border border-border"
+                          }`}
+                      >
+                        {tab.badge}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
       </header>
 
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
->>>>>>> fef57322168804fa18e83ff7e40bec04e453ed41
         {loading ? (
           <div className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -875,25 +574,6 @@ export default function CustomerPortalPage() {
                   }
                 />
 
-<<<<<<< HEAD
-                  <Card>
-                    <CardBody>
-                      <div className="text-xs uppercase tracking-wider text-[#9CA3AF]">
-                        Monthly Recurring Spend
-                      </div>
-                      <div className="text-2xl font-bold font-mono mt-2 text-white">
-                        {formatINR(
-                          activeSubs.reduce(
-                            (acc: number, s: any) =>
-                              acc + Number(s.mrrEquivalent ?? s.totalAmount ?? 0),
-                            0
-                          )
-                        )}
-                      </div>
-                      <div className="text-xs text-[#9CA3AF] mt-1">Normalized MRR equivalent</div>
-                    </CardBody>
-                  </Card>
-=======
                 {/* 4 StatCards Matching Admin Panel */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                   <StatCard
@@ -903,7 +583,6 @@ export default function CustomerPortalPage() {
                     subtitle="Auto-renewing active service plans"
                     trend={{ label: `${rawSubscriptions.length} total enrolled`, tone: "positive" }}
                   />
->>>>>>> fef57322168804fa18e83ff7e40bec04e453ed41
 
                   <StatCard
                     label="Monthly Recurring Spend"
@@ -938,60 +617,6 @@ export default function CustomerPortalPage() {
 
                 {/* Open Invoices Alert Banner */}
                 {openInvoices.length > 0 && (
-<<<<<<< HEAD
-                  <Card className="border-[#F59E0B]/40 bg-[#F59E0B]/[0.03]">
-                    <CardHeader
-                      title="Invoices Ready for Settlement"
-                      subtitle="Pay online securely via Razorpay (UPI, Netbanking, Corporate Cards)"
-                    />
-                    <CardBody className="divide-y divide-white/[0.06]">
-                      {openInvoices.map((inv: any) => {
-                        const dueAmount = Number(inv.outstandingAmount ?? inv.amountDue ?? 0);
-                        return (
-                          <div
-                            key={inv.id}
-                            className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-                          >
-                            <div>
-                              <div className="flex items-center gap-2.5">
-                                <span className="font-mono font-semibold text-sm text-white">
-                                  {inv.invoiceNumber}
-                                </span>
-                                <StatusBadge status={inv.status} />
-                              </div>
-                              <div className="text-xs text-[#9CA3AF] mt-1">
-                                Due {formatDate(inv.dueDate)} • Amount Due:{' '}
-                                <span className="font-mono text-white font-semibold">
-                                  {formatINR(dueAmount)}
-                                </span>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <a
-                                href={`/api/invoices/${inv.id}/pdf`}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-white/[0.05] hover:bg-white/[0.1] text-white border border-white/[0.08]"
-                              >
-                                <Download className="w-3.5 h-3.5" />
-                                PDF
-                              </a>
-                              <Button
-                                variant="primary"
-                                size="sm"
-                                disabled={busy}
-                                onClick={() => initiateRazorpayPayment(inv)}
-                              >
-                                <CreditCard className="w-3.5 h-3.5 mr-1.5" />
-                                Pay {formatINR(dueAmount)}
-                              </Button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </CardBody>
-                  </Card>
-=======
                   <div className="rounded-xl border border-semantic-warning/40 bg-semantic-warning-subtle/30 p-5 shadow-xs space-y-3">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2.5">
@@ -1064,7 +689,6 @@ export default function CustomerPortalPage() {
                       ))}
                     </div>
                   </div>
->>>>>>> fef57322168804fa18e83ff7e40bec04e453ed41
                 )}
 
                 {/* Subscriptions Overview Card */}
@@ -1089,8 +713,11 @@ export default function CustomerPortalPage() {
                         <EmptyState
                           title="No Active Subscriptions"
                           description="Subscribe to one of our available plans to start your subscription."
-                          actionLabel="Browse Available Plans"
-                          onAction={() => setActiveTab("PLANS")}
+                          action={
+                            <Button size="sm" onClick={() => setActiveTab("PLANS")}>
+                              Browse Available Plans
+                            </Button>
+                          }
                         />
                       </div>
                     ) : (
@@ -1112,19 +739,12 @@ export default function CustomerPortalPage() {
                                 <td className="py-3.5 px-4 font-mono font-medium text-text-primary">
                                   {sub.subscriptionNumber}
                                 </td>
-<<<<<<< HEAD
-                                <td className="py-3 px-3">
-                                  <div className="font-medium text-white">{sub.plan?.name}</div>
-                                  <div className="text-xs text-[#6B7280]">
-                                    {sub.plan?.billingFrequency || sub.billingFrequency}
-=======
                                 <td className="py-3.5 px-4">
                                   <div className="font-semibold text-text-primary">
                                     {sub.plan?.name}
                                   </div>
                                   <div className="font-mono text-[10px] text-text-muted">
                                     {sub.plan?.billingFrequency}
->>>>>>> fef57322168804fa18e83ff7e40bec04e453ed41
                                   </div>
                                 </td>
                                 <td className="py-3.5 px-4">
@@ -1197,33 +817,11 @@ export default function CustomerPortalPage() {
                       size="sm"
                       onClick={() => setActiveTab("PLANS")}
                     >
-<<<<<<< HEAD
-                      <div className="flex flex-wrap items-center justify-between gap-4">
-                        <div>
-                          <div className="flex items-center gap-2.5">
-                            <span className="font-mono font-bold text-white">
-                              {sub.subscriptionNumber}
-                            </span>
-                            <StatusBadge status={sub.status} />
-                            <span className="text-xs px-2 py-0.5 rounded bg-white/[0.05] text-[#9CA3AF] font-mono">
-                              {sub.plan?.name} ({sub.plan?.billingFrequency || sub.billingFrequency})
-                            </span>
-                          </div>
-                          <div className="text-xs text-[#9CA3AF] mt-1 flex items-center gap-4">
-                            <span>Started: {formatDate(sub.startDate)}</span>
-                            <span>
-                              Next Billing:{' '}
-                              {sub.nextBillingDate ? formatDate(sub.nextBillingDate) : 'Stopped'}
-                            </span>
-                          </div>
-                        </div>
-=======
                       <Sparkles className="w-3.5 h-3.5 mr-1.5" />
                       Add Subscription
                     </Button>
                   }
                 />
->>>>>>> fef57322168804fa18e83ff7e40bec04e453ed41
 
                 {/* Filter & Search Bar */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-border bg-bg-base p-4 shadow-xs">
@@ -1246,54 +844,16 @@ export default function CustomerPortalPage() {
                           key={st}
                           type="button"
                           onClick={() => setSubStatusFilter(st)}
-                          className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
-                            subStatusFilter === st
+                          className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${subStatusFilter === st
                               ? "bg-bg-base text-brand font-semibold shadow-xs"
                               : "text-text-muted hover:text-text-primary"
-                          }`}
+                            }`}
                         >
                           {st}
                         </button>
                       ))}
                     </div>
 
-<<<<<<< HEAD
-            {activeTab === 'PLANS' && (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                {plans.map((plan: any) => (
-                  <Card key={plan.id} className="flex flex-col justify-between">
-                    <CardBody className="space-y-4">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-mono uppercase tracking-wider px-2.5 py-0.5 rounded bg-[#10B981]/15 text-[#10B981]">
-                          {plan.billingFrequency}
-                        </span>
-                        <span className="text-xs font-mono text-[#6B7280]">
-                          {plan.planCode || plan.code}
-                        </span>
-                      </div>
-                      <div>
-                        <h3 className="text-lg font-semibold text-white">{plan.name}</h3>
-                        <p className="text-xs text-[#9CA3AF] mt-1">
-                          {plan.description || 'Enterprise recurring subscription plan'}
-                        </p>
-                      </div>
-                      <div className="pt-2 border-t border-white/[0.06]">
-                        <div className="text-2xl font-bold font-mono text-white">
-                          {formatINR(plan.basePrice)}
-                          <span className="text-xs font-normal text-[#9CA3AF]">
-                            {' '}
-                            / {(plan.billingFrequency || 'MONTHLY').toLowerCase()}
-                          </span>
-                        </div>
-                        <div className="text-xs text-[#9CA3AF] mt-1">
-                          Min Qty: {plan.minQuantity || 1} • Auto-renewable
-                        </div>
-                      </div>
-                      <Button
-                        variant="primary"
-                        className="w-full"
-                        onClick={() => setSubscribeModalPlan(plan)}
-=======
                     {/* Sort Dropdown */}
                     <div className="flex items-center gap-1.5 text-xs text-text-muted">
                       <ArrowUpDown className="w-3.5 h-3.5 text-text-muted" />
@@ -1301,7 +861,6 @@ export default function CustomerPortalPage() {
                         value={subSortBy}
                         onChange={(e: any) => setSubSortBy(e.target.value)}
                         className="h-9 rounded-lg border border-border bg-bg-base px-2.5 text-xs text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
->>>>>>> fef57322168804fa18e83ff7e40bec04e453ed41
                       >
                         <option value="NEWEST">Sort: Newest First</option>
                         <option value="AMOUNT_DESC">Sort: Highest Total</option>
@@ -1441,123 +1000,6 @@ export default function CustomerPortalPage() {
                   title="Available Subscription Plans"
                   description="Choose from our standard recurring plans. All subscriptions feature calendar-accurate renewal date clamping and automatic GST compliance."
                 />
-<<<<<<< HEAD
-                <CardBody>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="border-b border-white/[0.07] text-[11px] uppercase tracking-wider text-[#9CA3AF]">
-                          <th className="py-2.5 px-3">Invoice #</th>
-                          <th className="py-2.5 px-3">Issue Date</th>
-                          <th className="py-2.5 px-3">Due Date</th>
-                          <th className="py-2.5 px-3">Status</th>
-                          <th className="py-2.5 px-3 text-right">Total</th>
-                          <th className="py-2.5 px-3 text-right">Amount Due</th>
-                          <th className="py-2.5 px-3 text-right">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-white/[0.05] text-sm">
-                        {invoices.map((inv: any) => {
-                          const dueAmt = Number(inv.outstandingAmount ?? inv.amountDue ?? 0);
-                          return (
-                            <tr key={inv.id} className="hover:bg-white/[0.02]">
-                              <td className="py-3 px-3 font-mono text-xs text-white">
-                                {inv.invoiceNumber}
-                              </td>
-                              <td className="py-3 px-3 text-xs text-[#9CA3AF]">
-                                {formatDate(inv.invoiceDate || inv.issueDate)}
-                              </td>
-                              <td className="py-3 px-3 text-xs text-[#9CA3AF]">
-                                {formatDate(inv.dueDate)}
-                              </td>
-                              <td className="py-3 px-3">
-                                <StatusBadge status={inv.status} />
-                              </td>
-                              <td className="py-3 px-3 text-right font-mono text-white">
-                                {formatINR(inv.totalAmount)}
-                              </td>
-                              <td className="py-3 px-3 text-right font-mono font-semibold text-white">
-                                {formatINR(dueAmt)}
-                              </td>
-                              <td className="py-3 px-3 text-right space-x-2">
-                                <a
-                                  href={`/api/invoices/${inv.id}/pdf`}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs bg-white/[0.06] hover:bg-white/[0.12] text-white"
-                                >
-                                  <Download className="w-3 h-3" />
-                                  PDF
-                                </a>
-                                {dueAmt > 0 && inv.status !== 'CANCELLED' && (
-                                  <Button
-                                    variant="primary"
-                                    size="sm"
-                                    onClick={() => initiateRazorpayPayment(inv)}
-                                  >
-                                    Pay Now
-                                  </Button>
-                                )}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </CardBody>
-              </Card>
-            )}
-
-            {activeTab === 'PAYMENTS' && (
-              <Card>
-                <CardHeader
-                  title="Payment History"
-                  subtitle="Verified Razorpay and offline settlement ledger"
-                />
-                <CardBody>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="border-b border-white/[0.07] text-[11px] uppercase tracking-wider text-[#9CA3AF]">
-                          <th className="py-2.5 px-3">Payment #</th>
-                          <th className="py-2.5 px-3">Invoice</th>
-                          <th className="py-2.5 px-3">Method</th>
-                          <th className="py-2.5 px-3">Status</th>
-                          <th className="py-2.5 px-3">Paid At</th>
-                          <th className="py-2.5 px-3 text-right">Amount</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-white/[0.05] text-sm">
-                        {payments.map((p: any) => (
-                          <tr key={p.id} className="hover:bg-white/[0.02]">
-                            <td className="py-3 px-3 font-mono text-xs text-white">
-                              {p.paymentNumber}
-                            </td>
-                            <td className="py-3 px-3 font-mono text-xs text-[#9CA3AF]">
-                              {p.invoice?.invoiceNumber}
-                            </td>
-                            <td className="py-3 px-3 text-xs text-[#9CA3AF]">
-                              {p.method || p.paymentMethod}
-                            </td>
-                            <td className="py-3 px-3">
-                              <StatusBadge status={p.status} />
-                            </td>
-                            <td className="py-3 px-3 text-xs text-[#9CA3AF]">
-                              {formatDate(p.paymentDate || p.paidAt || p.createdAt)}
-                            </td>
-                            <td className="py-3 px-3 text-right font-mono font-semibold text-[#10B981]">
-                              {formatINR(p.amount)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </CardBody>
-              </Card>
-            )}
-=======
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {plans.map((plan: any) => (
@@ -1572,7 +1014,6 @@ export default function CustomerPortalPage() {
                           </span>
                           <span className="font-mono text-xs text-text-muted">{plan.code}</span>
                         </div>
->>>>>>> fef57322168804fa18e83ff7e40bec04e453ed41
 
                         <div>
                           <h3 className="text-lg font-bold text-text-primary">{plan.name}</h3>
@@ -1621,13 +1062,6 @@ export default function CustomerPortalPage() {
                   title="Tax Invoices"
                   description="Download official, GST-compliant PDF invoices for accounting and pay outstanding balances securely."
                 />
-<<<<<<< HEAD
-                <CardBody className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                  <div className="p-3.5 rounded-lg bg-[#161922] border border-white/[0.06]">
-                    <div className="text-xs text-[#9CA3AF]">Company / Legal Entity</div>
-                    <div className="font-medium text-white mt-1">
-                      {customer.companyName || customer.contactName || customer.user?.name}
-=======
 
                 {/* Filter & Search Bar */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-border bg-bg-base p-4 shadow-xs">
@@ -1650,11 +1084,10 @@ export default function CustomerPortalPage() {
                           key={st}
                           type="button"
                           onClick={() => setInvStatusFilter(st)}
-                          className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
-                            invStatusFilter === st
+                          className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${invStatusFilter === st
                               ? "bg-bg-base text-brand font-semibold shadow-xs"
                               : "text-text-muted hover:text-text-primary"
-                          }`}
+                            }`}
                         >
                           {st}
                         </button>
@@ -1673,7 +1106,6 @@ export default function CustomerPortalPage() {
                         <option value="DUE_ASC">Sort: Due Date (Earliest)</option>
                         <option value="AMOUNT_DESC">Sort: Highest Amount</option>
                       </select>
->>>>>>> fef57322168804fa18e83ff7e40bec04e453ed41
                     </div>
                   </div>
                 </div>
@@ -1800,11 +1232,10 @@ export default function CustomerPortalPage() {
                           key={m}
                           type="button"
                           onClick={() => setPayMethodFilter(m)}
-                          className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
-                            payMethodFilter === m
+                          className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${payMethodFilter === m
                               ? "bg-bg-base text-brand font-semibold shadow-xs"
                               : "text-text-muted hover:text-text-primary"
-                          }`}
+                            }`}
                         >
                           {m}
                         </button>
@@ -2018,16 +1449,6 @@ export default function CustomerPortalPage() {
               </div>
               <div className="flex justify-between text-xs text-text-muted">
                 <span>Razorpay Order ID</span>
-<<<<<<< HEAD
-                <span className="font-mono text-[#10B981]">
-                  {razorpayOrder.orderId || razorpayOrder.razorpayOrderId}
-                </span>
-              </div>
-              <div className="flex justify-between text-sm font-semibold pt-2 border-t border-white/[0.06]">
-                <span>Payable Amount</span>
-                <span className="font-mono text-white">
-                  {formatINR(payModalInvoice.outstandingAmount ?? payModalInvoice.amountDue)}
-=======
                 <span className="font-mono text-brand font-semibold">
                   {razorpayOrder.orderId}
                 </span>
@@ -2040,7 +1461,6 @@ export default function CustomerPortalPage() {
                     payModalInvoice.amountDue ??
                     payModalInvoice.totalAmount
                   )}
->>>>>>> fef57322168804fa18e83ff7e40bec04e453ed41
                 </span>
               </div>
             </div>
@@ -2102,11 +1522,7 @@ export default function CustomerPortalPage() {
             >
               {products.map((p: any) => (
                 <option key={p.id} value={p.id}>
-<<<<<<< HEAD
-                  {p.name} ({formatINR(p.salesPrice ?? p.basePrice)})
-=======
                   {p.name} ({formatINR(p.salesPrice || p.basePrice || 1000)})
->>>>>>> fef57322168804fa18e83ff7e40bec04e453ed41
                 </option>
               ))}
             </Select>
@@ -2118,7 +1534,7 @@ export default function CustomerPortalPage() {
             >
               {taxes.map((t: any) => (
                 <option key={t.id} value={t.id}>
-                  {t.name} ({Number(t.percentage ?? t.rate ?? 0)}%)
+                  {t.name} ({Number(t.rate)}%)
                 </option>
               ))}
             </Select>
@@ -2129,11 +1545,7 @@ export default function CustomerPortalPage() {
               </label>
               <input
                 type="text"
-<<<<<<< HEAD
-                placeholder="e.g. ENTERPRISE20"
-=======
                 placeholder="e.g. SAVE20"
->>>>>>> fef57322168804fa18e83ff7e40bec04e453ed41
                 value={discountCode}
                 onChange={(e) => setDiscountCode(e.target.value.toUpperCase())}
                 className="w-full h-9 px-3 rounded-md border border-border bg-bg-base text-xs text-text-primary font-mono uppercase focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"

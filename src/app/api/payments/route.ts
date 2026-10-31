@@ -21,14 +21,14 @@ export async function GET(req: NextRequest) {
       ...(method ? { method } : {}),
       ...(search
         ? {
-            OR: [
-              { paymentNumber: { contains: search } },
-              { transactionReference: { contains: search } },
-              { invoice: { invoiceNumber: { contains: search } } },
-              { customer: { contactName: { contains: search } } },
-              { customer: { companyName: { contains: search } } },
-            ],
-          }
+          OR: [
+            { paymentNumber: { contains: search } },
+            { transactionReference: { contains: search } },
+            { invoice: { invoiceNumber: { contains: search } } },
+            { customer: { contactName: { contains: search } } },
+            { customer: { companyName: { contains: search } } },
+          ],
+        }
         : {}),
     };
 
@@ -71,7 +71,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const session = await requireAuth(req);
+    const session = await requireAuth(req, ["ADMIN", "EMPLOYEE"]);
     const body = await req.json();
     if (body.action === "REFUND") {
       const refunded = await PaymentService.refundPayment(session, body);

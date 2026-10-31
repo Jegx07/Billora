@@ -10,7 +10,12 @@ export async function POST(req: NextRequest) {
       await AuthService.logout(session.sessionId);
     }
     const res = apiSuccess({ loggedOut: true });
-    res.cookies.delete(SESSION_COOKIE_NAME);
+    res.cookies.set(SESSION_COOKIE_NAME, "", {
+      httpOnly: true,
+      sameSite: "lax",
+      path: "/",
+      maxAge: 0,
+    });
     return res;
   } catch (error) {
     return handleApiError(error);
