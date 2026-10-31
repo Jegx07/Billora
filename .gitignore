@@ -1,0 +1,28 @@
+# Dependencies
+/node_modules
+/.pnp
+.pnp.js
+
+# Next.js build output
+/.next/
+/out/
+/build
+
+# Environment variables & secrets (keep .env.example in git)
+.env
+.env*.local
+
+# Local SQLite database files
+prisma/*.db
+prisma/*.db-journal
+*.db
+*.db-journal
+
+# Logs & OS files
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
+Thumbs.db
+*.tsbuildinfo
+next-env.d.ts
