@@ -1,12 +1,33 @@
 import type { PrismaClient as PrismaClientType } from "@prisma/client";
+import fs from "fs";
+import path from "path";
 
 const DEFAULT_SQLITE_URL = "file:./dev.db";
+
+function resolveDatabaseUrl(rawUrl?: string): string {
+  const url = rawUrl && rawUrl.trim() ? rawUrl.trim() : DEFAULT_SQLITE_URL;
+  if (url.startsWith("file:")) {
+    const rawPath = url.slice("file:".length);
+    if (!path.isAbsolute(rawPath)) {
+      const inCwd = path.resolve(process.cwd(), rawPath);
+      const inPrisma = path.resolve(process.cwd(), "prisma", rawPath);
+      if (fs.existsSync(inCwd)) {
+        return `file:${inCwd}`;
+      }
+      if (fs.existsSync(inPrisma)) {
+        return `file:${inPrisma}`;
+      }
+      return `file:${inPrisma}`;
+    }
+  }
+  return url;
+}
 
 if (!process.env.DATABASE_URL || !process.env.DATABASE_URL.trim()) {
   process.env.DATABASE_URL = DEFAULT_SQLITE_URL;
 }
 
-const resolvedDatabaseUrl = process.env.DATABASE_URL || DEFAULT_SQLITE_URL;
+const resolvedDatabaseUrl = resolveDatabaseUrl(process.env.DATABASE_URL);
 
 const globalForPrisma = globalThis as unknown as {
   prisma?: PrismaClientType;
