@@ -1,4 +1,4 @@
-import { calculateVariantUnitPrice, round2 } from "@/lib/money";
+import { calculateVariantUnitPrice, round2, toNumber2 } from "@/lib/money";
 import { prisma } from "@/server/db/client";
 import { AppError } from "@/server/errors";
 import { AuthSessionContext } from "@/server/middlewares/auth";
@@ -9,7 +9,36 @@ import {
   taxRuleSchema,
   variantSchema,
 } from "@/server/validators/schemas";
+import fs from "fs";
+import path from "path";
 import { z } from "zod";
+
+function getPlanImages(): Record<string, string> {
+  try {
+    const file = path.join(process.cwd(), "public", "uploads", "plan-images.json");
+    if (fs.existsSync(file)) {
+      return JSON.parse(fs.readFileSync(file, "utf-8"));
+    }
+  } catch {}
+  return {};
+}
+
+function setPlanImage(planId: string, imageUrl: string | null) {
+  try {
+    const dir = path.join(process.cwd(), "public", "uploads");
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    const file = path.join(dir, "plan-images.json");
+    const current = getPlanImages();
+    if (imageUrl) {
+      current[planId] = imageUrl;
+    } else {
+      delete current[planId];
+    }
+    fs.writeFileSync(file, JSON.stringify(current, null, 2), "utf-8");
+  } catch {}
+}
 
 export class CatalogService {
   /**
@@ -249,7 +278,7 @@ export class CatalogService {
    */
   static async createSubscriptionPlan(
     session: AuthSessionContext,
-    rawInput: z.infer<typeof subscriptionPlanSchema>
+    rawInput: z.input<typeof subscriptionPlanSchema>
   ) {
     if (session.role !== "ADMIN") {
       throw new AppError("FORBIDDEN", "Only administrators can create subscription plans", 403);
@@ -288,8 +317,13 @@ export class CatalogService {
       },
       include: {
         planProducts: { include: { product: true } },
+        _count: { select: { subscriptions: true } },
       },
     });
+
+    if (input.imageUrl) {
+      setPlanImage(plan.id, input.imageUrl);
+    }
 
     await AuditService.log({
       actorId: session.userId,
@@ -305,18 +339,27 @@ export class CatalogService {
       },
     });
 
-    return plan;
+    return {
+      ...plan,
+      basePrice: toNumber2(plan.basePrice),
+      imageUrl: input.imageUrl ?? null,
+    };
   }
 
   static async updateSubscriptionPlan(
     session: AuthSessionContext,
     planId: string,
-    rawInput: Partial<z.infer<typeof subscriptionPlanSchema>>
+    rawInput: Partial<z.input<typeof subscriptionPlanSchema>> & { imageUrl?: string | null }
   ) {
     if (session.role !== "ADMIN") {
       throw new AppError("FORBIDDEN", "Only administrators can update subscription plans", 403);
     }
-    return prisma.subscriptionPlan.update({
+    const existing = await prisma.subscriptionPlan.findUnique({ where: { id: planId } });
+    if (!existing) {
+      throw new AppError("NOT_FOUND", "Subscription plan not found", 404);
+    }
+
+    const updated = await prisma.subscriptionPlan.update({
       where: { id: planId },
       data: {
         ...(rawInput.name !== undefined ? { name: rawInput.name } : {}),
@@ -331,9 +374,99 @@ export class CatalogService {
           : {}),
         ...(rawInput.allowPause !== undefined ? { allowPause: rawInput.allowPause } : {}),
         ...(rawInput.allowRenewal !== undefined ? { allowRenewal: rawInput.allowRenewal } : {}),
+        ...(rawInput.defaultTermMonths !== undefined
+          ? { defaultTermMonths: rawInput.defaultTermMonths }
+          : {}),
         ...(rawInput.autoCloseDays !== undefined ? { autoCloseDays: rawInput.autoCloseDays } : {}),
         ...(rawInput.status !== undefined ? { status: rawInput.status } : {}),
       },
+      include: {
+        planProducts: { include: { product: true } },
+        _count: { select: { subscriptions: true } },
+      },
     });
+
+    if (rawInput.imageUrl !== undefined) {
+      setPlanImage(planId, rawInput.imageUrl);
+    }
+
+    await AuditService.log({
+      actorId: session.userId,
+      actorRole: session.role,
+      action: "SUBSCRIPTION_PLAN_UPDATED",
+      entityType: "SubscriptionPlan",
+      entityId: planId,
+      beforeData: {
+        name: existing.name,
+        status: existing.status,
+        basePrice: existing.basePrice.toString(),
+      },
+      afterData: {
+        name: updated.name,
+        status: updated.status,
+        basePrice: updated.basePrice.toString(),
+      },
+    });
+
+    return {
+      ...updated,
+      basePrice: toNumber2(updated.basePrice),
+      imageUrl: rawInput.imageUrl !== undefined ? rawInput.imageUrl : (getPlanImages()[planId] ?? null),
+    };
+  }
+
+  static async deleteSubscriptionPlan(session: AuthSessionContext, planId: string) {
+    if (session.role !== "ADMIN") {
+      throw new AppError("FORBIDDEN", "Only administrators can delete subscription plans", 403);
+    }
+    const plan = await prisma.subscriptionPlan.findUnique({
+      where: { id: planId },
+      include: {
+        _count: {
+          select: {
+            subscriptions: true,
+            quotations: true,
+            templates: true,
+          },
+        },
+      },
+    });
+
+    if (!plan) {
+      throw new AppError("NOT_FOUND", "Subscription plan not found", 404);
+    }
+
+    if (plan._count.subscriptions > 0 || plan._count.quotations > 0) {
+      throw new AppError(
+        "CONFLICT",
+        `Cannot delete subscription plan "${plan.name}" (${plan.planCode}) because it is linked to ${plan._count.subscriptions} active subscription(s) and ${plan._count.quotations} quotation(s). Please deactivate the plan instead to prevent new subscriptions while preserving financial integrity.`,
+        409
+      );
+    }
+
+    await prisma.subscriptionPlan.delete({
+      where: { id: planId },
+    });
+
+    setPlanImage(planId, null);
+
+    await AuditService.log({
+      actorId: session.userId,
+      actorRole: session.role,
+      action: "SUBSCRIPTION_PLAN_DELETED",
+      entityType: "SubscriptionPlan",
+      entityId: planId,
+      beforeData: {
+        planCode: plan.planCode,
+        name: plan.name,
+        basePrice: plan.basePrice.toString(),
+        billingFrequency: plan.billingFrequency,
+      },
+    });
+
+    return {
+      success: true,
+      message: `Plan ${plan.planCode} (${plan.name}) deleted successfully`,
+    };
   }
 }
