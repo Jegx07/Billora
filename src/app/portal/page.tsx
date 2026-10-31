@@ -17,7 +17,6 @@ import {
   Sparkles,
   LogOut,
   Shield,
-  Calendar,
   ArrowUpRight,
 } from 'lucide-react';
 import {
@@ -29,6 +28,7 @@ import {
   Modal,
   Select,
   EmptyState,
+  useToast,
 } from '@/components/ui/Primitives';
 import { formatINR, formatDate } from '@/lib/utils';
 
@@ -43,6 +43,7 @@ type TabKey =
 
 export default function CustomerPortalPage() {
   const router = useRouter();
+  const { toast } = useToast();
   const [activeTab, setActiveTab] = useState<TabKey>('OVERVIEW');
   const [data, setData] = useState<any>(null);
   const [plans, setPlans] = useState<any[]>([]);
@@ -50,6 +51,7 @@ export default function CustomerPortalPage() {
   const [taxes, setTaxes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [switchingRole, setSwitchingRole] = useState<string | null>(null);
 
   // Checkout Modal State
   const [payModalInvoice, setPayModalInvoice] = useState<any | null>(null);
@@ -65,26 +67,50 @@ export default function CustomerPortalPage() {
   async function loadPortal() {
     setLoading(true);
     try {
-      const [overviewRes, plansRes, prodRes, taxRes] = await Promise.all([
-        fetch('/api/portal/overview'),
-        fetch('/api/plans'),
-        fetch('/api/products'),
-        fetch('/api/taxes'),
+      let overviewRes = await fetch('/api/portal/overview', { cache: 'no-store' });
+      let overviewJson = await overviewRes.json();
+
+      // Auto-switch to CUSTOMER demo session if user navigated directly to /portal without a customer session
+      if (!overviewJson.success && !overviewJson.ok) {
+        const switchRes = await fetch('/api/auth/demo-switch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          cache: 'no-store',
+          body: JSON.stringify({ role: 'CUSTOMER' }),
+        });
+        const switchJson = await switchRes.json();
+        if (switchJson.success) {
+          overviewRes = await fetch('/api/portal/overview', { cache: 'no-store' });
+          overviewJson = await overviewRes.json();
+        }
+      }
+
+      const [plansRes, prodRes, taxRes] = await Promise.all([
+        fetch('/api/plans', { cache: 'no-store' }),
+        fetch('/api/products', { cache: 'no-store' }),
+        fetch('/api/taxes', { cache: 'no-store' }),
       ]);
-      const overviewJson = await overviewRes.json();
       const plansJson = await plansRes.json();
       const prodJson = await prodRes.json();
       const taxJson = await taxRes.json();
 
-      if (overviewJson.ok) setData(overviewJson.data);
-      if (plansJson.ok) setPlans(plansJson.data);
-      if (prodJson.ok) {
-        setProducts(prodJson.data);
-        if (prodJson.data[0]) setSelectedProductId(prodJson.data[0].id);
+      if (overviewJson.success || overviewJson.ok) {
+        setData(overviewJson.data);
       }
-      if (taxJson.ok) {
-        setTaxes(taxJson.data);
-        if (taxJson.data[0]) setSelectedTaxId(taxJson.data[0].id);
+      if (plansJson.success || plansJson.ok) {
+        setPlans(plansJson.data || []);
+      } else if (overviewJson.data?.availablePlans) {
+        setPlans(overviewJson.data.availablePlans);
+      }
+      if (prodJson.success || prodJson.ok) {
+        const prodList = prodJson.data || [];
+        setProducts(prodList);
+        if (prodList[0]) setSelectedProductId(prodList[0].id);
+      }
+      if (taxJson.success || taxJson.ok) {
+        const taxList = taxJson.data || [];
+        setTaxes(taxList);
+        if (taxList[0]) setSelectedTaxId(taxList[0].id);
       }
     } finally {
       setLoading(false);
@@ -103,7 +129,20 @@ export default function CustomerPortalPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action }),
       });
-      if (res.ok) await loadPortal();
+      const json = await res.json();
+      if (json.success || res.ok) {
+        toast({
+          title: `Subscription ${action.toLowerCase()}d`,
+          variant: 'success',
+        });
+        await loadPortal();
+      } else {
+        toast({
+          title: 'Action not allowed',
+          description: json.error?.message || 'Could not update subscription',
+          variant: 'error',
+        });
+      }
     } finally {
       setBusy(false);
     }
@@ -118,9 +157,15 @@ export default function CustomerPortalPage() {
         body: JSON.stringify({ invoiceId: invoice.id, paymentMethod }),
       });
       const json = await res.json();
-      if (json.ok) {
+      if (json.success || json.ok) {
         setRazorpayOrder(json.data);
         setPayModalInvoice(invoice);
+      } else {
+        toast({
+          title: 'Unable to initiate payment',
+          description: json.error?.message || 'Error creating Razorpay order',
+          variant: 'error',
+        });
       }
     } finally {
       setBusy(false);
@@ -131,20 +176,37 @@ export default function CustomerPortalPage() {
     if (!razorpayOrder) return;
     setBusy(true);
     try {
+      const orderId = razorpayOrder.orderId || razorpayOrder.razorpayOrderId;
+      const samplePayId =
+        razorpayOrder.testSignaturePreview?.sampleRazorpayPaymentId || `pay_${Date.now()}`;
+      const sampleSig = razorpayOrder.testSignaturePreview?.sampleSignature || '';
+
       const res = await fetch('/api/payments/razorpay/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           paymentId: razorpayOrder.paymentId,
-          razorpayOrderId: razorpayOrder.razorpayOrderId,
-          razorpayPaymentId: `pay_${Date.now()}`,
-          simulateSignature: true,
+          razorpayOrderId: orderId,
+          razorpayPaymentId: samplePayId,
+          razorpaySignature: sampleSig,
         }),
       });
-      if (res.ok) {
+      const json = await res.json();
+      if (json.success || res.ok) {
+        toast({
+          title: 'Payment Verified',
+          description: `Invoice ${payModalInvoice?.invoiceNumber || ''} settled via Razorpay.`,
+          variant: 'success',
+        });
         setPayModalInvoice(null);
         setRazorpayOrder(null);
         await loadPortal();
+      } else {
+        toast({
+          title: 'Payment verification failed',
+          description: json.error?.message || 'Signature verification error',
+          variant: 'error',
+        });
       }
     } finally {
       setBusy(false);
@@ -164,25 +226,35 @@ export default function CustomerPortalPage() {
           planId: subscribeModalPlan.id,
           startDate: new Date().toISOString(),
           discountCode: discountCode.trim() || undefined,
-          autoRenew: true,
           activateImmediately: true,
           lines: [
             {
               productId: selectedProductId,
-              quantity: 1,
-              taxId: selectedTaxId || undefined,
+              quantity: Math.max(1, Number(subscribeModalPlan.minQuantity || 1)),
+              taxRuleId: selectedTaxId || undefined,
             },
           ],
         }),
       });
       const json = await res.json();
-      if (json.ok) {
+      if (json.success || json.ok) {
         // Trigger billing run so customer immediately sees their initial invoice
-        await fetch('/api/billing/run', { method: 'POST' });
+        await fetch('/api/billing/run', { method: 'POST', body: JSON.stringify({}) });
+        toast({
+          title: 'Subscription Activated!',
+          description: `Subscribed to ${subscribeModalPlan.name}.`,
+          variant: 'success',
+        });
         setSubscribeModalPlan(null);
         setDiscountCode('');
         await loadPortal();
         setActiveTab('SUBSCRIPTIONS');
+      } else {
+        toast({
+          title: 'Subscription failed',
+          description: json.error?.message || 'Could not create subscription',
+          variant: 'error',
+        });
       }
     } finally {
       setBusy(false);
@@ -190,15 +262,43 @@ export default function CustomerPortalPage() {
   }
 
   async function switchDemoRole(role: 'ADMIN' | 'EMPLOYEE' | 'CUSTOMER') {
-    await fetch('/api/auth/demo-switch', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ role }),
-    });
-    if (role === 'CUSTOMER') {
-      await loadPortal();
-    } else {
-      router.push('/dashboard');
+    if (switchingRole) return;
+    setSwitchingRole(role);
+    try {
+      const res = await fetch('/api/auth/demo-switch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store',
+        body: JSON.stringify({ role }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        toast({
+          title: `Switched to ${role} View`,
+          description: `Signed in as ${json.data.user.fullName} (${json.data.user.email})`,
+          variant: 'info',
+        });
+        if (role === 'CUSTOMER') {
+          await loadPortal();
+        } else {
+          router.push('/dashboard');
+          router.refresh();
+        }
+      } else {
+        toast({
+          title: 'Role switch failed',
+          description: json.error?.message || 'Unable to switch role',
+          variant: 'error',
+        });
+      }
+    } catch {
+      toast({
+        title: 'Role switch failed',
+        description: 'Network error while switching role',
+        variant: 'error',
+      });
+    } finally {
+      setSwitchingRole(null);
     }
   }
 
@@ -209,11 +309,13 @@ export default function CustomerPortalPage() {
   const notifications = data?.notifications || [];
 
   const activeSubs = subscriptions.filter((s: any) => s.status === 'ACTIVE');
-  const openInvoices = invoices.filter((i: any) =>
-    ['CONFIRMED', 'PARTIALLY_PAID', 'OVERDUE'].includes(i.status)
+  const openInvoices = invoices.filter(
+    (i: any) =>
+      ['CONFIRMED', 'PARTIALLY_PAID', 'OVERDUE'].includes(i.status) &&
+      Number(i.outstandingAmount ?? i.amountDue ?? 0) > 0
   );
   const totalOutstanding = openInvoices.reduce(
-    (acc: number, inv: any) => acc + Number(inv.amountDue),
+    (acc: number, inv: any) => acc + Number(inv.outstandingAmount ?? inv.amountDue ?? 0),
     0
   );
 
@@ -221,45 +323,64 @@ export default function CustomerPortalPage() {
     <div className="min-h-screen bg-[#090A0F] text-[#F3F4F6]">
       {/* Top Customer Portal Bar */}
       <header className="sticky top-0 z-30 border-b border-white/[0.07] bg-[#090A0F]/90 backdrop-blur-md">
-        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <Link href="/" className="flex items-center gap-2.5">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-3">
+            <Link href="/portal" className="flex items-center gap-2.5">
               <div className="h-8 w-8 rounded-lg bg-[#10B981]/15 border border-[#10B981]/40 flex items-center justify-center text-[#10B981] font-bold">
                 B
               </div>
               <div>
                 <span className="font-semibold text-sm tracking-tight text-white">Billora</span>
-                <span className="ml-2 text-[11px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-white/[0.06] text-[#9CA3AF]">
+                <span className="hidden sm:inline-block ml-2 text-[11px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-white/[0.06] text-[#9CA3AF]">
                   Self-Service Portal
                 </span>
               </div>
             </Link>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="hidden md:flex items-center gap-1.5 bg-[#11131A] border border-white/[0.08] rounded-md px-2.5 py-1 text-xs">
-              <Shield className="w-3.5 h-3.5 text-[#10B981]" />
-              <span className="text-[#9CA3AF]">Demo Switch:</span>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div
+              role="group"
+              aria-label="Role switcher"
+              className="flex items-center gap-1 bg-[#11131A] border border-white/[0.08] rounded-md p-1 text-[11px] font-mono"
+            >
+              <Shield className="hidden sm:inline w-3.5 h-3.5 text-[#10B981] ml-1.5 mr-0.5" />
+              <span className="hidden lg:inline text-[#9CA3AF] mr-1">Experience:</span>
               <button
+                type="button"
+                disabled={switchingRole !== null}
                 onClick={() => switchDemoRole('ADMIN')}
-                className="px-2 py-0.5 rounded hover:bg-white/[0.06] text-[#F3F4F6] font-medium"
+                className="px-2 py-1 rounded hover:bg-white/[0.08] text-[#D1D5DB] hover:text-white transition-colors disabled:opacity-60"
               >
-                Admin Console
+                Admin
               </button>
               <button
+                type="button"
+                disabled={switchingRole !== null}
                 onClick={() => switchDemoRole('EMPLOYEE')}
-                className="px-2 py-0.5 rounded hover:bg-white/[0.06] text-[#F3F4F6] font-medium"
+                className="px-2 py-1 rounded hover:bg-white/[0.08] text-[#D1D5DB] hover:text-white transition-colors disabled:opacity-60"
               >
-                Employee Ops
+                Employee
+              </button>
+              <button
+                type="button"
+                disabled={switchingRole !== null}
+                onClick={() => switchDemoRole('CUSTOMER')}
+                className="px-2 py-1 rounded bg-[#10B981] text-[#090A0F] font-semibold transition-colors disabled:opacity-60"
+              >
+                <span className="hidden sm:inline">Customer Portal</span>
+                <span className="sm:hidden">Customer</span>
               </button>
             </div>
 
             {customer && (
-              <div className="text-right hidden sm:block">
+              <div className="text-right hidden md:block">
                 <div className="text-xs font-medium text-white">
-                  {customer.companyName || customer.user?.name}
+                  {customer.companyName || customer.contactName || customer.user?.name}
                 </div>
-                <div className="text-[11px] text-[#6B7280] font-mono">{customer.user?.email}</div>
+                <div className="text-[11px] text-[#6B7280] font-mono">
+                  {customer.email || customer.user?.email}
+                </div>
               </div>
             )}
 
@@ -271,14 +392,14 @@ export default function CustomerPortalPage() {
                 router.push('/login');
               }}
             >
-              <LogOut className="w-3.5 h-3.5 mr-1.5" />
-              Sign Out
+              <LogOut className="w-3.5 h-3.5 sm:mr-1.5" />
+              <span className="hidden sm:inline">Sign Out</span>
             </Button>
           </div>
         </div>
 
         {/* Navigation Tabs */}
-        <div className="max-w-7xl mx-auto px-6 flex items-center gap-1 overflow-x-auto border-t border-white/[0.04]">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 flex items-center gap-1 overflow-x-auto border-t border-white/[0.04]">
           {[
             { key: 'OVERVIEW', label: 'Overview', icon: Layers },
             { key: 'SUBSCRIPTIONS', label: `My Subscriptions (${subscriptions.length})`, icon: Sparkles },
@@ -293,6 +414,7 @@ export default function CustomerPortalPage() {
             return (
               <button
                 key={tab.key}
+                type="button"
                 onClick={() => setActiveTab(tab.key as TabKey)}
                 className={`flex items-center gap-2 px-4 py-3 text-xs font-medium border-b-2 transition-colors whitespace-nowrap ${
                   active
@@ -309,7 +431,7 @@ export default function CustomerPortalPage() {
       </header>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-6 py-8 space-y-6">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-6">
         {loading ? (
           <div className="p-12 text-center text-sm text-[#9CA3AF]">
             Loading customer billing ledger...
@@ -340,7 +462,11 @@ export default function CustomerPortalPage() {
                       </div>
                       <div className="text-2xl font-bold font-mono mt-2 text-white">
                         {formatINR(
-                          activeSubs.reduce((acc: number, s: any) => acc + Number(s.mrrEquivalent), 0)
+                          activeSubs.reduce(
+                            (acc: number, s: any) =>
+                              acc + Number(s.mrrEquivalent ?? s.totalAmount ?? 0),
+                            0
+                          )
                         )}
                       </div>
                       <div className="text-xs text-[#9CA3AF] mt-1">Normalized MRR equivalent</div>
@@ -390,47 +516,50 @@ export default function CustomerPortalPage() {
                       subtitle="Pay online securely via Razorpay (UPI, Netbanking, Corporate Cards)"
                     />
                     <CardBody className="divide-y divide-white/[0.06]">
-                      {openInvoices.map((inv: any) => (
-                        <div
-                          key={inv.id}
-                          className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
-                        >
-                          <div>
-                            <div className="flex items-center gap-2.5">
-                              <span className="font-mono font-semibold text-sm text-white">
-                                {inv.invoiceNumber}
-                              </span>
-                              <StatusBadge status={inv.status} />
+                      {openInvoices.map((inv: any) => {
+                        const dueAmount = Number(inv.outstandingAmount ?? inv.amountDue ?? 0);
+                        return (
+                          <div
+                            key={inv.id}
+                            className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                          >
+                            <div>
+                              <div className="flex items-center gap-2.5">
+                                <span className="font-mono font-semibold text-sm text-white">
+                                  {inv.invoiceNumber}
+                                </span>
+                                <StatusBadge status={inv.status} />
+                              </div>
+                              <div className="text-xs text-[#9CA3AF] mt-1">
+                                Due {formatDate(inv.dueDate)} • Amount Due:{' '}
+                                <span className="font-mono text-white font-semibold">
+                                  {formatINR(dueAmount)}
+                                </span>
+                              </div>
                             </div>
-                            <div className="text-xs text-[#9CA3AF] mt-1">
-                              Due {formatDate(inv.dueDate)} • Amount Due:{' '}
-                              <span className="font-mono text-white font-semibold">
-                                {formatINR(inv.amountDue)}
-                              </span>
+                            <div className="flex items-center gap-2">
+                              <a
+                                href={`/api/invoices/${inv.id}/pdf`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-white/[0.05] hover:bg-white/[0.1] text-white border border-white/[0.08]"
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                                PDF
+                              </a>
+                              <Button
+                                variant="primary"
+                                size="sm"
+                                disabled={busy}
+                                onClick={() => initiateRazorpayPayment(inv)}
+                              >
+                                <CreditCard className="w-3.5 h-3.5 mr-1.5" />
+                                Pay {formatINR(dueAmount)}
+                              </Button>
                             </div>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <a
-                              href={`/api/invoices/${inv.id}/pdf`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-white/[0.05] hover:bg-white/[0.1] text-white border border-white/[0.08]"
-                            >
-                              <Download className="w-3.5 h-3.5" />
-                              PDF
-                            </a>
-                            <Button
-                              variant="primary"
-                              size="sm"
-                              disabled={busy}
-                              onClick={() => initiateRazorpayPayment(inv)}
-                            >
-                              <CreditCard className="w-3.5 h-3.5 mr-1.5" />
-                              Pay {formatINR(inv.amountDue)}
-                            </Button>
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </CardBody>
                   </Card>
                 )}
@@ -478,7 +607,7 @@ export default function CustomerPortalPage() {
                                 <td className="py-3 px-3">
                                   <div className="font-medium text-white">{sub.plan?.name}</div>
                                   <div className="text-xs text-[#6B7280]">
-                                    {sub.plan?.billingFrequency}
+                                    {sub.plan?.billingFrequency || sub.billingFrequency}
                                   </div>
                                 </td>
                                 <td className="py-3 px-3">
@@ -556,7 +685,7 @@ export default function CustomerPortalPage() {
                             </span>
                             <StatusBadge status={sub.status} />
                             <span className="text-xs px-2 py-0.5 rounded bg-white/[0.05] text-[#9CA3AF] font-mono">
-                              {sub.plan?.name} ({sub.plan?.billingFrequency})
+                              {sub.plan?.name} ({sub.plan?.billingFrequency || sub.billingFrequency})
                             </span>
                           </div>
                           <div className="text-xs text-[#9CA3AF] mt-1 flex items-center gap-4">
@@ -631,7 +760,9 @@ export default function CustomerPortalPage() {
                         <span className="text-xs font-mono uppercase tracking-wider px-2.5 py-0.5 rounded bg-[#10B981]/15 text-[#10B981]">
                           {plan.billingFrequency}
                         </span>
-                        <span className="text-xs font-mono text-[#6B7280]">{plan.code}</span>
+                        <span className="text-xs font-mono text-[#6B7280]">
+                          {plan.planCode || plan.code}
+                        </span>
                       </div>
                       <div>
                         <h3 className="text-lg font-semibold text-white">{plan.name}</h3>
@@ -644,11 +775,11 @@ export default function CustomerPortalPage() {
                           {formatINR(plan.basePrice)}
                           <span className="text-xs font-normal text-[#9CA3AF]">
                             {' '}
-                            / {plan.billingFrequency.toLowerCase()}
+                            / {(plan.billingFrequency || 'MONTHLY').toLowerCase()}
                           </span>
                         </div>
                         <div className="text-xs text-[#9CA3AF] mt-1">
-                          Trial period: {plan.trialDays || 0} days • Auto-renewable
+                          Min Qty: {plan.minQuantity || 1} • Auto-renewable
                         </div>
                       </div>
                       <Button
@@ -685,48 +816,51 @@ export default function CustomerPortalPage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-white/[0.05] text-sm">
-                        {invoices.map((inv: any) => (
-                          <tr key={inv.id} className="hover:bg-white/[0.02]">
-                            <td className="py-3 px-3 font-mono text-xs text-white">
-                              {inv.invoiceNumber}
-                            </td>
-                            <td className="py-3 px-3 text-xs text-[#9CA3AF]">
-                              {formatDate(inv.issueDate)}
-                            </td>
-                            <td className="py-3 px-3 text-xs text-[#9CA3AF]">
-                              {formatDate(inv.dueDate)}
-                            </td>
-                            <td className="py-3 px-3">
-                              <StatusBadge status={inv.status} />
-                            </td>
-                            <td className="py-3 px-3 text-right font-mono text-white">
-                              {formatINR(inv.totalAmount)}
-                            </td>
-                            <td className="py-3 px-3 text-right font-mono font-semibold text-white">
-                              {formatINR(inv.amountDue)}
-                            </td>
-                            <td className="py-3 px-3 text-right space-x-2">
-                              <a
-                                href={`/api/invoices/${inv.id}/pdf`}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs bg-white/[0.06] hover:bg-white/[0.12] text-white"
-                              >
-                                <Download className="w-3 h-3" />
-                                PDF
-                              </a>
-                              {Number(inv.amountDue) > 0 && inv.status !== 'CANCELLED' && (
-                                <Button
-                                  variant="primary"
-                                  size="sm"
-                                  onClick={() => initiateRazorpayPayment(inv)}
+                        {invoices.map((inv: any) => {
+                          const dueAmt = Number(inv.outstandingAmount ?? inv.amountDue ?? 0);
+                          return (
+                            <tr key={inv.id} className="hover:bg-white/[0.02]">
+                              <td className="py-3 px-3 font-mono text-xs text-white">
+                                {inv.invoiceNumber}
+                              </td>
+                              <td className="py-3 px-3 text-xs text-[#9CA3AF]">
+                                {formatDate(inv.invoiceDate || inv.issueDate)}
+                              </td>
+                              <td className="py-3 px-3 text-xs text-[#9CA3AF]">
+                                {formatDate(inv.dueDate)}
+                              </td>
+                              <td className="py-3 px-3">
+                                <StatusBadge status={inv.status} />
+                              </td>
+                              <td className="py-3 px-3 text-right font-mono text-white">
+                                {formatINR(inv.totalAmount)}
+                              </td>
+                              <td className="py-3 px-3 text-right font-mono font-semibold text-white">
+                                {formatINR(dueAmt)}
+                              </td>
+                              <td className="py-3 px-3 text-right space-x-2">
+                                <a
+                                  href={`/api/invoices/${inv.id}/pdf`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-xs bg-white/[0.06] hover:bg-white/[0.12] text-white"
                                 >
-                                  Pay Now
-                                </Button>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
+                                  <Download className="w-3 h-3" />
+                                  PDF
+                                </a>
+                                {dueAmt > 0 && inv.status !== 'CANCELLED' && (
+                                  <Button
+                                    variant="primary"
+                                    size="sm"
+                                    onClick={() => initiateRazorpayPayment(inv)}
+                                  >
+                                    Pay Now
+                                  </Button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -762,12 +896,14 @@ export default function CustomerPortalPage() {
                             <td className="py-3 px-3 font-mono text-xs text-[#9CA3AF]">
                               {p.invoice?.invoiceNumber}
                             </td>
-                            <td className="py-3 px-3 text-xs text-[#9CA3AF]">{p.paymentMethod}</td>
+                            <td className="py-3 px-3 text-xs text-[#9CA3AF]">
+                              {p.method || p.paymentMethod}
+                            </td>
                             <td className="py-3 px-3">
                               <StatusBadge status={p.status} />
                             </td>
                             <td className="py-3 px-3 text-xs text-[#9CA3AF]">
-                              {p.paidAt ? formatDate(p.paidAt) : formatDate(p.createdAt)}
+                              {formatDate(p.paymentDate || p.paidAt || p.createdAt)}
                             </td>
                             <td className="py-3 px-3 text-right font-mono font-semibold text-[#10B981]">
                               {formatINR(p.amount)}
@@ -820,7 +956,7 @@ export default function CustomerPortalPage() {
                   <div className="p-3.5 rounded-lg bg-[#161922] border border-white/[0.06]">
                     <div className="text-xs text-[#9CA3AF]">Company / Legal Entity</div>
                     <div className="font-medium text-white mt-1">
-                      {customer.companyName || customer.user?.name}
+                      {customer.companyName || customer.contactName || customer.user?.name}
                     </div>
                   </div>
                   <div className="p-3.5 rounded-lg bg-[#161922] border border-white/[0.06]">
@@ -861,12 +997,14 @@ export default function CustomerPortalPage() {
               </div>
               <div className="flex justify-between text-xs text-[#9CA3AF]">
                 <span>Razorpay Order ID</span>
-                <span className="font-mono text-[#10B981]">{razorpayOrder.razorpayOrderId}</span>
+                <span className="font-mono text-[#10B981]">
+                  {razorpayOrder.orderId || razorpayOrder.razorpayOrderId}
+                </span>
               </div>
               <div className="flex justify-between text-sm font-semibold pt-2 border-t border-white/[0.06]">
                 <span>Payable Amount</span>
                 <span className="font-mono text-white">
-                  {formatINR(payModalInvoice.amountDue)}
+                  {formatINR(payModalInvoice.outstandingAmount ?? payModalInvoice.amountDue)}
                 </span>
               </div>
             </div>
@@ -909,7 +1047,7 @@ export default function CustomerPortalPage() {
             >
               {products.map((p: any) => (
                 <option key={p.id} value={p.id}>
-                  {p.name} ({formatINR(p.basePrice)})
+                  {p.name} ({formatINR(p.salesPrice ?? p.basePrice)})
                 </option>
               ))}
             </Select>
@@ -921,7 +1059,7 @@ export default function CustomerPortalPage() {
             >
               {taxes.map((t: any) => (
                 <option key={t.id} value={t.id}>
-                  {t.name} ({Number(t.rate)}%)
+                  {t.name} ({Number(t.percentage ?? t.rate ?? 0)}%)
                 </option>
               ))}
             </Select>
@@ -932,7 +1070,7 @@ export default function CustomerPortalPage() {
               </label>
               <input
                 type="text"
-                placeholder="e.g. LAUNCH20"
+                placeholder="e.g. ENTERPRISE20"
                 value={discountCode}
                 onChange={(e) => setDiscountCode(e.target.value.toUpperCase())}
                 className="w-full h-9 px-3 rounded-md bg-[#090A0F] border border-white/[0.1] text-sm text-white font-mono"

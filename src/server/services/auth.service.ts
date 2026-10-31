@@ -232,7 +232,10 @@ export class AuthService {
       message: `A password reset token was generated for your account. It expires in 30 minutes.`,
     });
 
-    return { resetToken: rawResetToken, expiresAt };
+    return {
+      message: "If an account with this email exists, a password reset link has been dispatched.",
+      expiresAt,
+    };
   }
 
   static async resetPassword(rawInput: z.infer<typeof resetPasswordSchema>) {
@@ -362,6 +365,11 @@ export class AuthService {
     const existing = await prisma.customer.findUnique({ where: { email: input.email } });
     if (existing) {
       throw new AppError("CONFLICT", "A customer with this email already exists", 409);
+    }
+
+    const existingUser = await prisma.user.findUnique({ where: { email: input.email } });
+    if (existingUser) {
+      throw new AppError("CONFLICT", "An account with this email address already exists", 409);
     }
 
     const customerRole = await prisma.role.findUniqueOrThrow({ where: { name: "CUSTOMER" } });

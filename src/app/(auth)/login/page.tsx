@@ -49,28 +49,17 @@ export default function LoginPage() {
     }
   };
 
-  const quickDemoLogin = async (role: "ADMIN" | "EMPLOYEE" | "CUSTOMER") => {
-    setLoading(true);
+  const fillRoleCredentials = (role: "ADMIN" | "EMPLOYEE" | "CUSTOMER") => {
     setErrorMsg(null);
-    try {
-      const res = await fetch("/api/auth/demo-switch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role }),
-      });
-      const json = await res.json();
-      if (json.success) {
-        toast({
-          title: `Signed in as ${role}`,
-          description: json.data.user.email,
-          variant: "success",
-        });
-        router.push(role === "CUSTOMER" ? "/portal" : "/dashboard");
-      } else {
-        setErrorMsg(json.error?.message || "Failed to switch demo role");
-      }
-    } finally {
-      setLoading(false);
+    if (role === "ADMIN") {
+      setEmail("admin@billora.io");
+      setPassword("Admin@Billora2026!");
+    } else if (role === "EMPLOYEE") {
+      setEmail("arjun.mehta@billora.io");
+      setPassword("Emp@Billora2026!");
+    } else {
+      setEmail("priya.sharma@acmeindia.in");
+      setPassword("Cust@Billora2026!");
     }
   };
 

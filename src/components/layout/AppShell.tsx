@@ -3,19 +3,15 @@
 import { useToast } from "@/components/ui/Primitives";
 import { cn } from "@/lib/utils";
 import {
-  Activity,
   BadgePercent,
-  BarChart3,
   Bell,
   Bot,
   Boxes,
   Building2,
-  CalendarClock,
   ChevronLeft,
   ChevronRight,
   Command,
   CreditCard,
-  FileCheck2,
   FileSpreadsheet,
   Landmark,
   Layers,
@@ -30,7 +26,6 @@ import {
   ShieldAlert,
   Sun,
   TrendingUp,
-  UserCheck,
   Users,
   X,
 } from "lucide-react";
@@ -186,6 +181,22 @@ const NAVIGATION_GROUPS: NavGroup[] = [
   },
 ];
 
+function isPathAllowedForRole(pathname: string, role: "ADMIN" | "EMPLOYEE"): boolean {
+  if (role === "ADMIN") return true;
+  const adminOnlyPrefixes = [
+    "/employees",
+    "/products",
+    "/plans",
+    "/discounts",
+    "/taxes",
+    "/audit-logs",
+    "/settings",
+  ];
+  return !adminOnlyPrefixes.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
+  );
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -200,41 +211,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [darkMode, setDarkMode] = useState(false);
   const [unreadNotifs, setUnreadNotifs] = useState(0);
 
-  const loadSession = async () => {
-    try {
-      const res = await fetch("/api/auth/me");
-      const json = await res.json();
-      if (json.success && json.data?.authenticated) {
-        const u = json.data.user as SessionUser;
-        setUser(u);
-        if (u.role === "CUSTOMER") {
-          router.replace("/portal");
-          return;
-        }
-      } else {
-        // Auto-authenticate as ADMIN in development if no session cookie is set yet so direct navigation works seamlessly
-        const demoRes = await fetch("/api/auth/demo-switch", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ role: "ADMIN" }),
-        });
-        const demoJson = await demoRes.json();
-        if (demoJson.success) {
-          setUser(demoJson.data.user);
-        } else {
-          router.replace("/login");
-        }
-      }
-    } catch {
-      // ignore
-    } finally {
-      setLoadingAuth(false);
-    }
-  };
-
   const loadNotificationCount = async () => {
     try {
-      const res = await fetch("/api/notifications");
+      const res = await fetch("/api/notifications", { cache: "no-store" });
       const json = await res.json();
       if (json.success) {
         setUnreadNotifs(json.data.unreadCount || 0);
@@ -244,10 +223,39 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const loadSession = async () => {
+    try {
+      const res = await fetch("/api/auth/me", { cache: "no-store" });
+      const json = await res.json();
+      if (json.success && json.data?.authenticated) {
+        const u = json.data.user as SessionUser;
+        setUser(u);
+        if (u.role === "CUSTOMER") {
+          router.replace("/portal");
+          return;
+        }
+      } else {
+        router.replace("/login");
+        return;
+      }
+    } catch {
+      router.replace("/login");
+    } finally {
+      setLoadingAuth(false);
+    }
+  };
+
   useEffect(() => {
     loadSession();
     loadNotificationCount();
   }, []);
+
+  // Redirect EMPLOYEE away from ADMIN-only routes if navigated directly
+  useEffect(() => {
+    if (!loadingAuth && user?.role === "EMPLOYEE" && !isPathAllowedForRole(pathname, "EMPLOYEE")) {
+      router.replace("/dashboard");
+    }
+  }, [loadingAuth, user, pathname, router]);
 
   // Global Cmd+K shortcut
   useEffect(() => {
@@ -273,43 +281,29 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const handleRoleSwitch = async (role: "ADMIN" | "EMPLOYEE" | "CUSTOMER") => {
+  const handleLogout = async () => {
     try {
-      const res = await fetch("/api/auth/demo-switch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role }),
-      });
-      const json = await res.json();
-      if (json.success) {
-        toast({
-          title: `Switched to ${role} View`,
-          description: `Signed in as ${json.data.user.fullName} (${json.data.user.email})`,
-          variant: "info",
-        });
-        setUser(json.data.user);
-        if (role === "CUSTOMER") {
-          router.push("/portal");
-        } else {
-          router.push("/dashboard");
-          router.refresh();
-        }
-      }
-    } catch {
-      toast({
-        title: "Role switch failed",
-        variant: "error",
-      });
+      await fetch("/api/auth/logout", { method: "POST" });
+    } finally {
+      setUser(null);
+      router.replace("/login");
+      router.refresh();
     }
   };
 
-  const handleLogout = async () => {
-    await fetch("/api/auth/logout", { method: "POST" });
-    router.push("/login");
-  };
+  if (loadingAuth || !user || user.role === "CUSTOMER") {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-bg-canvas">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand border-t-transparent" />
+          <span className="font-mono text-xs text-text-muted">Authenticating workspace session...</span>
+        </div>
+      </div>
+    );
+  }
 
   const activeRole: "ADMIN" | "EMPLOYEE" =
-    user?.role === "EMPLOYEE" ? "EMPLOYEE" : "ADMIN";
+    user.role === "EMPLOYEE" ? "EMPLOYEE" : "ADMIN";
 
   const filteredGroups = NAVIGATION_GROUPS.map((g) => ({
     ...g,
@@ -397,15 +391,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           ))}
         </nav>
 
-        {/* User Footer */}
-        <div className="border-t border-white/10 p-3">
+        {/* User Footer with Profile & Role Switcher */}
+        <div className="border-t border-white/10 p-3 space-y-2.5">
           {!collapsed && user && (
-            <div className="mb-2.5 px-1">
-              <div className="flex items-center justify-between">
+            <div className="px-1">
+              <div className="flex items-center justify-between gap-2">
                 <span className="text-xs font-semibold text-white truncate">
                   {user.fullName}
                 </span>
-                <span className="rounded bg-indigo-500/20 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-indigo-300 border border-indigo-400/30">
+                <span className="rounded bg-indigo-500/20 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-indigo-300 border border-indigo-400/30 shrink-0">
                   {user.role}
                 </span>
               </div>
@@ -428,8 +422,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       {/* Main Content Area */}
       <div className="flex flex-1 flex-col min-w-0">
         {/* Topbar */}
-        <header className="no-print sticky top-0 z-30 flex h-14 items-center justify-between gap-3 border-b border-border bg-bg-base/90 backdrop-blur-md px-4 sm:px-6">
-          <div className="flex items-center gap-3">
+        <header className="no-print sticky top-0 z-30 flex h-14 items-center justify-between gap-2 border-b border-border bg-bg-base/90 backdrop-blur-md px-3 sm:px-6">
+          <div className="flex items-center gap-2 sm:gap-3">
             <button
               type="button"
               onClick={() => setMobileMenuOpen(true)}
@@ -443,52 +437,31 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <button
               type="button"
               onClick={() => setCmdOpen(true)}
-              className="flex items-center gap-2.5 h-8 rounded-md border border-border bg-bg-subtle/60 px-3 text-xs text-text-muted hover:border-border-strong hover:text-text-primary transition-colors"
+              className="flex items-center gap-2 h-8 rounded-md border border-border bg-bg-subtle/60 px-2.5 sm:px-3 text-xs text-text-muted hover:border-border-strong hover:text-text-primary transition-colors"
             >
               <Search className="h-3.5 w-3.5" />
-              <span className="hidden sm:inline">Jump to module or action...</span>
-              <span className="sm:hidden">Search...</span>
-              <kbd className="ml-2 hidden sm:inline-flex items-center gap-0.5 rounded border border-border bg-bg-base px-1.5 py-0.5 font-mono text-[10px] text-text-muted">
+              <span className="hidden md:inline">Jump to module or action...</span>
+              <span className="md:hidden">Search</span>
+              <kbd className="ml-1 hidden sm:inline-flex items-center gap-0.5 rounded border border-border bg-bg-base px-1.5 py-0.5 font-mono text-[10px] text-text-muted">
                 <Command className="h-2.5 w-2.5" />K
               </kbd>
             </button>
           </div>
 
-          {/* Right Controls: Instant Role Switcher + Notifications + Theme */}
-          <div className="flex items-center gap-2">
-            <div className="hidden md:flex items-center rounded-md border border-border bg-bg-subtle p-0.5 text-[11px] font-mono">
-              <span className="px-2 text-text-muted">Experience:</span>
-              <button
-                type="button"
-                onClick={() => handleRoleSwitch("ADMIN")}
+          {/* Right Controls: Authenticated Role Indicator + Notifications + Theme */}
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            <div className="flex items-center gap-1.5 rounded-md border border-border bg-bg-subtle px-2.5 py-1 text-xs">
+              <span className="text-text-muted">Role:</span>
+              <span
                 className={cn(
-                  "px-2 py-1 rounded transition-colors",
-                  user?.role === "ADMIN"
-                    ? "bg-brand text-white font-semibold"
-                    : "text-text-secondary hover:text-text-primary"
+                  "font-mono font-semibold text-[11px] px-1.5 py-0.5 rounded",
+                  user.role === "ADMIN"
+                    ? "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border border-indigo-500/30"
+                    : "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30"
                 )}
               >
-                Admin
-              </button>
-              <button
-                type="button"
-                onClick={() => handleRoleSwitch("EMPLOYEE")}
-                className={cn(
-                  "px-2 py-1 rounded transition-colors",
-                  user?.role === "EMPLOYEE"
-                    ? "bg-brand text-white font-semibold"
-                    : "text-text-secondary hover:text-text-primary"
-                )}
-              >
-                Employee
-              </button>
-              <button
-                type="button"
-                onClick={() => handleRoleSwitch("CUSTOMER")}
-                className="px-2 py-1 rounded text-text-secondary hover:text-text-primary transition-colors"
-              >
-                Customer Portal
-              </button>
+                {user.role}
+              </span>
             </div>
 
             <Link
@@ -513,7 +486,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        {/* Workspace Page Body */}
+        {/* Workspace Page Body (keyed by active user & role so switching roles immediately remounts and refreshes data) */}
         <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-[1600px] w-full mx-auto">
           {loadingAuth ? (
             <div className="space-y-4">
@@ -528,7 +501,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </div>
             </div>
           ) : (
-            children
+            <React.Fragment key={`${user?.id ?? "guest"}-${user?.role ?? "none"}`}>
+              {children}
+            </React.Fragment>
           )}
         </main>
       </div>
@@ -574,6 +549,28 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </div>
               ))}
             </div>
+
+            {user && (
+              <div className="border-t border-white/10 pt-3 space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-white truncate">{user.fullName}</span>
+                  <span className="rounded bg-indigo-500/20 px-1.5 py-0.5 font-mono text-[10px] text-indigo-300">
+                    {user.role}
+                  </span>
+                </div>
+                <div className="text-[11px] font-mono text-slate-400 truncate">
+                  {user.email}
+                </div>
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="flex w-full items-center justify-center gap-2 rounded-md border border-white/10 bg-white/5 px-2.5 py-1.5 text-xs font-medium text-slate-300 hover:bg-white/10 hover:text-white transition-colors"
+                >
+                  <LogOut className="h-3.5 w-3.5" />
+                  <span>Sign Out</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
